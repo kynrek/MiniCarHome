@@ -4,7 +4,7 @@ An easy-to-use, clutter-free home launcher for cars with Android "AI boxes", suc
 [**MMB MAX CarPlay AI Box for BMW 2023+ (iDrive 8/8.5/9), Android 13, 8+128GB**](https://www.amazon.com/dp/B0GXK6XD3N).
 That's the box this was built and tested on, and it works with the **2023 MINI Cooper SE**.
 
-Website: **https://minicarhome.kynrek.com**
+Website: **https://minicarhome.kynrek.com** · Companion app: **[Box Tools](https://github.com/kynrek/BoxTools)**
 
 Your navigation app runs live in a big window, and a slim panel beside it holds the clock, weather,
 what's playing and the apps you actually use in the car. No ads, promo tiles or floating buttons.
@@ -83,6 +83,7 @@ The panel compacts itself as it narrows: shorter date, a smaller music card, sta
 ![All apps](docs/screenshots/browser.png)
 
 ### Box Tools (companion app)
+[Box Tools](https://github.com/kynrek/BoxTools) is a separate repo. Install it alongside MiniCarHome:
 - **Edge gestures** replace the box's floating ball: swipe in from the left or right edge for **Back**,
   swipe up from the bottom for **Home**, swipe up and pause for **Recent apps**.
 - **Wireless Debug** icon: turns ADB-over-Wi-Fi back on after a reboot in one tap.
@@ -123,11 +124,12 @@ Settings menus, but ADB does it all at once.)
 
 ### 2. Install the apps and run the setup
 
-Both apps are in this repo, prebuilt (`minicarhome/apk/`, `boxtools/apk/`) and as source. Install
+MiniCarHome is in this repo, prebuilt (`minicarhome/apk/`) and as source. Get Box Tools from its own
+repo, **[kynrek/BoxTools](https://github.com/kynrek/BoxTools)** (`apk/boxtools.apk`). Install
 **Box Tools first**, because it defines the permission MiniCarHome uses, then run the one-time setup over ADB:
 
 ```sh
-adb install boxtools/apk/boxtools.apk
+adb install boxtools.apk          # from github.com/kynrek/BoxTools
 adb install minicarhome/apk/minicarhome.apk
 
 # MiniCarHome
@@ -169,11 +171,10 @@ No Gradle needed: just the Android SDK build tools and platform 36 in `~/Library
 
 ```sh
 JAVA_HOME=/path/to/jdk-21 zsh minicarhome/build.sh
-JAVA_HOME=/path/to/jdk-21 zsh boxtools/build.sh
 ```
 
-Each writes `out/<name>.apk`, signed with `~/.android/debug.keystore`. Both apps must be signed with
-the same key.
+This writes `minicarhome/out/minicarhome.apk`, signed with `~/.android/debug.keystore`. Build
+[Box Tools](https://github.com/kynrek/BoxTools) with the same key: MiniCarHome uses its signature permission.
 
 ## How it works
 
