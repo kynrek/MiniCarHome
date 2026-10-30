@@ -1051,14 +1051,14 @@ public class HomeActivity extends Activity {
             controls.addView(prev);
         }
         if (seek) {
-            TextView back = mediaButton("↺" + secs, wide, five);
+            TextView back = mediaButton("↺", wide, five);
             back.setContentDescription("Back " + secs + " seconds");
             back.setOnClickListener(v -> seekBy(-secs * 1000L));
             controls.addView(back);
         }
         controls.addView(playButton);
         if (seek) {
-            TextView fwd = mediaButton(secs + "↻", wide, five);
+            TextView fwd = mediaButton("↻", wide, five);
             fwd.setContentDescription("Forward " + secs + " seconds");
             fwd.setOnClickListener(v -> seekBy(secs * 1000L));
             controls.addView(fwd);

@@ -39,7 +39,7 @@ in front, so the panel disappears until you leave Settings.
   3 or more icons wide.
 - **Now playing**: artwork, title, a progress bar and time remaining, and controls for whatever is
   playing (Podcast Addict, Audible, Spotify, Symfonium…): previous/next track (|◀ ▶|), seek back and
-  forward (↺15 15↻) and play/pause. Tap the card to open that app.
+  forward (↺ ↻) and play/pause. Tap the card to open that app.
 - **Shortcuts** to your car apps, scrolling if they don't fit, plus **All apps**.
 - **Assistant button**: starts Google's voice assistant ("navigate to…", "call…").
 - **Wi-Fi and cell signal** with bars, plus the carrier and network type.
