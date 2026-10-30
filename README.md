@@ -1,7 +1,8 @@
 # MiniCarHome
 
 An easy-to-use, clutter-free home launcher for cars with Android "AI boxes", such as the
-**MMB MAX CarPlay AI Box for BMW 2023+ (iDrive 8/8.5/9), Android 13, 8+128GB**.
+[**MMB MAX CarPlay AI Box for BMW 2023+ (iDrive 8/8.5/9), Android 13, 8+128GB**](https://www.amazon.com/dp/B0GXK6XD3N).
+That's the box this was built and tested on, and it works with the **2023 MINI Cooper SE**.
 
 Your navigation app runs live in a big window, and a slim panel beside it holds the clock, weather,
 what's playing and the apps you actually use in the car. No ads, promo tiles or floating buttons.
@@ -11,8 +12,8 @@ at **1180 × 480 pixels (120 dpi)**. Most of the layout adapts to the screen, bu
 tuned there. (The unit it was built on reports Android 14.)
 
 ![Home screen](docs/screenshots/home.png)
-<sub>Home screen: Google Maps in the main window (blurred here for privacy), the panel on the right with
-weather, now playing, shortcuts and signal.</sub>
+<sub>Home screen: Google Maps in the main window, the panel on the right with weather, now playing,
+shortcuts and signal. (Account photo and track details blurred.)</sub>
 
 ## Features
 
@@ -27,11 +28,18 @@ panel still beside it. Open another app and it replaces the previous one. **Home
 Maps keeps running underneath the whole time, so you don't lose your route. (Turn this off in settings
 to open apps full screen instead.)
 
+![An app in the main window](docs/screenshots/pane.png)
+<sub>The Play Store opened from the panel, running in the main window.</sub>
+
+Android's own Settings app is the one exception: Android hides every app's overlay windows while it's
+in front, so the panel disappears until you leave Settings.
+
 ### The panel
 - **Clock and date**, with **weather** beside it (current conditions, high and low) when the panel is
   3 or more icons wide.
-- **Now playing**: artwork, title, play/pause/skip, a progress bar and time remaining, for whatever is
-  playing (Podcast Addict, Audible, Spotify, Symfonium…). Tap the card to open that app.
+- **Now playing**: artwork, title, a progress bar and time remaining, and controls for whatever is
+  playing (Podcast Addict, Audible, Spotify, Symfonium…): previous/next track (|◀ ▶|), seek back and
+  forward (↺15 15↻) and play/pause. Tap the card to open that app.
 - **Shortcuts** to your car apps, scrolling if they don't fit, plus **All apps**.
 - **Assistant button**: starts Google's voice assistant ("navigate to…", "call…").
 - **Wi-Fi and cell signal** with bars, plus the carrier and network type.
@@ -44,6 +52,8 @@ to open apps full screen instead.)
 | Main display app | Any app; Google Maps by default |
 | Open apps in main window | On / off |
 | Clock & date, Media, Assistant | Each on / off |
+| Media buttons | Both (track + seek, default), Track only or Seek only |
+| Seek seconds | 5, 10, 15 (default), 30 or 60 |
 | Signal | Off, top or bottom |
 | Edit shortcuts | Move (◀ ▶), remove (✕) and add (+, from the full app list) |
 | Reset shortcuts | Back to the default list |
@@ -106,6 +116,19 @@ adb shell pm disable-user --user 0 com.applepie.floatingball   # optional: hide 
 
 Back to the stock home screen:
 `adb shell cmd package set-home-activity com.android.launcher3/.uioverrides.QuickstepLauncher`
+
+## Troubleshooting
+
+**Tip for the MMB BMW box (from its support instructions):** after connecting the box to a power
+source, use your phone to search for the Bluetooth device named **"JoyeBox"**, then dial
+**#135177**. The LED indicator light switches from steady white to steady red.
+
+**The box keeps rebooting and ADB drops.** If the box can reach your car over Bluetooth and Wi-Fi, it
+starts a wireless CarPlay session; when that link drops, the box's CarPlay service reboots Android,
+which also turns Wireless debugging off. Tap **Wireless Debug** (Box Tools) to turn it back on.
+
+**An app opens full screen instead of in the main window.** Android won't move a window that's already
+open. Swipe the app away in Recents once and it will open in the main window from then on.
 
 ## Build
 

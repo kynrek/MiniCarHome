@@ -382,6 +382,11 @@ public class HomeActivity extends Activity {
         rebuildPanel();
     }
 
+    private void setString(String key, String value) {
+        prefs.edit().putString(key, value).apply();
+        rebuildPanel();
+    }
+
     private void setSignalPlace(String place) {
         prefs.edit().putString("signals", place).apply();
         rebuildPanel();
@@ -653,6 +658,29 @@ public class HomeActivity extends Activity {
         s.addView(toggleRow("Clock & date", "show_clock"), marginTop(ViewGroup.LayoutParams.MATCH_PARENT, 12));
         s.addView(toggleRow("Media", "show_media"), marginTop(ViewGroup.LayoutParams.MATCH_PARENT, 6));
         s.addView(toggleRow("Assistant", "show_mic"), marginTop(ViewGroup.LayoutParams.MATCH_PARENT, 6));
+
+        s.addView(text("Media buttons", 14, TEXT), marginTop(ViewGroup.LayoutParams.WRAP_CONTENT, 12));
+        LinearLayout mb = new LinearLayout(this);
+        mb.setOrientation(LinearLayout.HORIZONTAL);
+        String buttons = prefs.getString("media_buttons", "both");
+        mb.addView(choice("Both", "both".equals(buttons), v -> setString("media_buttons", "both")));
+        mb.addView(choice("Track", "track".equals(buttons), v -> setString("media_buttons", "track")));
+        mb.addView(choice("Seek", "seek".equals(buttons), v -> setString("media_buttons", "seek")));
+        s.addView(mb, marginTop(ViewGroup.LayoutParams.WRAP_CONTENT, 6));
+
+        s.addView(text("Seek seconds", 14, TEXT), marginTop(ViewGroup.LayoutParams.WRAP_CONTENT, 12));
+        HorizontalScrollView seekScroll = new HorizontalScrollView(this);
+        seekScroll.setHorizontalScrollBarEnabled(false);
+        LinearLayout sk = new LinearLayout(this);
+        sk.setOrientation(LinearLayout.HORIZONTAL);
+        for (int secs : new int[]{5, 10, 15, 30, 60}) {
+            sk.addView(choice(String.valueOf(secs), secs == seekSeconds(), v -> {
+                prefs.edit().putInt("seek_seconds", secs).apply();
+                rebuildPanel();
+            }));
+        }
+        seekScroll.addView(sk);
+        s.addView(seekScroll, marginTop(ViewGroup.LayoutParams.WRAP_CONTENT, 6));
 
         s.addView(text("Signal", 14, TEXT), marginTop(ViewGroup.LayoutParams.WRAP_CONTENT, 12));
         LinearLayout sig = new LinearLayout(this);
@@ -1006,23 +1034,47 @@ public class HomeActivity extends Activity {
         info.addView(mediaTitle);
         info.addView(mediaArtist);
 
+        // Buttons: skip track (|◀ ▶|) and/or seek by the chosen seconds (↺15 15↻), per settings.
+        String buttons = prefs.getString("media_buttons", "both");
+        boolean track = !"seek".equals(buttons), seek = !"track".equals(buttons);
+        int secs = seekSeconds();
+        boolean five = track && seek;
         LinearLayout controls = new LinearLayout(this);
         controls.setOrientation(LinearLayout.HORIZONTAL);
         controls.setGravity(Gravity.CENTER_HORIZONTAL);
-        TextView prev = mediaButton("◀◀", wide);
-        playButton = mediaButton("▶", wide);
-        TextView next = mediaButton("▶▶", wide);
-        prev.setOnClickListener(v -> { if (controller != null) controller.getTransportControls().skipToPrevious(); });
-        next.setOnClickListener(v -> { if (controller != null) controller.getTransportControls().skipToNext(); });
+        playButton = mediaButton("▶", wide, five);
         playButton.setOnClickListener(v -> togglePlay());
-        controls.addView(prev);
+        if (track) {
+            TextView prev = mediaButton("|◀", wide, five);
+            prev.setContentDescription("Previous track");
+            prev.setOnClickListener(v -> { if (controller != null) controller.getTransportControls().skipToPrevious(); });
+            controls.addView(prev);
+        }
+        if (seek) {
+            TextView back = mediaButton("↺" + secs, wide, five);
+            back.setContentDescription("Back " + secs + " seconds");
+            back.setOnClickListener(v -> seekBy(-secs * 1000L));
+            controls.addView(back);
+        }
         controls.addView(playButton);
-        controls.addView(next);
+        if (seek) {
+            TextView fwd = mediaButton(secs + "↻", wide, five);
+            fwd.setContentDescription("Forward " + secs + " seconds");
+            fwd.setOnClickListener(v -> seekBy(secs * 1000L));
+            controls.addView(fwd);
+        }
+        if (track) {
+            TextView next = mediaButton("▶|", wide, five);
+            next.setContentDescription("Next track");
+            next.setOnClickListener(v -> { if (controller != null) controller.getTransportControls().skipToNext(); });
+            controls.addView(next);
+        }
 
-        if (wide) info.addView(controls);
+        // Three buttons fit beside the artwork on wide panels; five get their own row.
+        if (wide && !five) info.addView(controls);
         top.addView(info, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
         card.addView(top);
-        if (!wide) card.addView(controls, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        if (!wide || five) card.addView(controls, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         // Progress bar with time remaining, shown when the app reports a track length.
         progressRow = new LinearLayout(this);
@@ -1289,6 +1341,34 @@ public class HomeActivity extends Activity {
         showProgress();
     }
 
+    private int seekSeconds() { return prefs.getInt("seek_seconds", 15); }
+
+    /** Where playback is now, extrapolated from the app's last position report. */
+    private long currentPosition(PlaybackState s) {
+        long position = s.getPosition();
+        if (s.getState() == PlaybackState.STATE_PLAYING) {
+            position += (long) ((SystemClock.elapsedRealtime() - s.getLastPositionUpdateTime()) * s.getPlaybackSpeed());
+        }
+        return Math.max(0, position);
+    }
+
+    /** Jump forward or back; uses seekTo when the app supports it, otherwise its own fast-forward/rewind. */
+    private void seekBy(long deltaMs) {
+        if (controller == null) return;
+        PlaybackState s = controller.getPlaybackState();
+        MediaMetadata m = controller.getMetadata();
+        if (s != null && (s.getActions() & PlaybackState.ACTION_SEEK_TO) != 0 && s.getPosition() >= 0) {
+            long target = Math.max(0, currentPosition(s) + deltaMs);
+            long duration = m == null ? 0 : m.getLong(MediaMetadata.METADATA_KEY_DURATION);
+            if (duration > 0) target = Math.min(duration, target);
+            controller.getTransportControls().seekTo(target);
+        } else if (deltaMs < 0) {
+            controller.getTransportControls().rewind();
+        } else {
+            controller.getTransportControls().fastForward();
+        }
+    }
+
     /** Refresh the progress bar and time remaining; repeats every second while something plays. */
     private final Runnable progressTick = this::showProgress;
 
@@ -1303,11 +1383,7 @@ public class HomeActivity extends Activity {
             return;
         }
         boolean playing = s.getState() == PlaybackState.STATE_PLAYING;
-        long position = s.getPosition();
-        if (playing) {   // the app reports position only occasionally; extrapolate from its last report
-            position += (long) ((SystemClock.elapsedRealtime() - s.getLastPositionUpdateTime()) * s.getPlaybackSpeed());
-        }
-        position = Math.max(0, Math.min(duration, position));
+        long position = Math.min(duration, currentPosition(s));   // apps report position only occasionally
         progressRow.setVisibility(View.VISIBLE);
         mediaProgress.setProgress((int) (1000 * position / duration));
         mediaRemaining.setText("\u2212" + clockTime(duration - position));
@@ -1399,10 +1475,11 @@ public class HomeActivity extends Activity {
     }
 
     /** Media transport button: bigger text and touch target than the settings controls. */
-    private TextView mediaButton(String s, boolean wide) {
-        TextView b = text(s, wide ? 24 : 22, TEXT);
+    private TextView mediaButton(String s, boolean wide, boolean five) {
+        TextView b = text(s, five ? (wide ? 20 : 16) : (wide ? 24 : 22), TEXT);
         b.setGravity(Gravity.CENTER);
-        b.setMinWidth(dp(wide ? 64 : 54));
+        b.setSingleLine(true);
+        b.setMinWidth(dp(five ? (wide ? 52 : 38) : (wide ? 64 : 54)));
         b.setMinHeight(dp(44));
         b.setPadding(0, dp(4), 0, dp(4));
         return b;
