@@ -15,7 +15,7 @@ tuned there. (The unit it was built on reports Android 14.)
 
 ![Home screen](docs/screenshots/home.png)
 <sub>Home screen: Google Maps in the main window, the panel on the right with weather, now playing,
-shortcuts and signal. (Account photo and track details blurred.)</sub>
+shortcuts and signal. (Account photo blurred.)</sub>
 
 ## Features
 
