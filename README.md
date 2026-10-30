@@ -4,6 +4,14 @@ An easy-to-use, clutter-free home launcher for cars with Android "AI boxes", suc
 [**MMB MAX CarPlay AI Box for BMW 2023+ (iDrive 8/8.5/9), Android 13, 8+128GB**](https://www.amazon.com/dp/B0GXK6XD3N).
 That's the box this was built and tested on, and it works with the **2023 MINI Cooper SE**.
 
+### How the box works with the MINI
+
+The 2023 MINI Cooper supports **wireless Apple CarPlay**, but not Android Auto. The box gets around that
+by pretending to be an iPhone: it pairs with the car over Bluetooth, joins the car's CarPlay Wi-Fi, and
+**streams its whole Android screen to the car over wireless CarPlay**. The car's touchscreen sends your
+touches back. So you get a full Android system on the car's display, with no iPhone (or Android phone)
+needed. With its own SIM card, the box also has its own mobile data.
+
 Website: **https://minicarhome.kynrek.com** · Companion app: **[Box Tools](https://github.com/kynrek/BoxTools)**
 
 Your navigation app runs live in a big window, and a slim panel beside it holds the clock, weather,
