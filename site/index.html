@@ -179,11 +179,23 @@
       <h2>Install</h2>
       <p class="sub">MiniCarHome needs a one-time setup from a computer with ADB, because it uses Android features that
         ordinary apps can’t switch on themselves (freeform windows and a few permissions).</p>
+      <h3>1. Turn on Developer options and Wireless debugging on the box</h3>
+      <ol>
+        <li>In the box’s own <strong>Settings</strong> app, open <strong>About</strong> and tap the build number until it says you’re a developer.</li>
+        <li>In <strong>More settings</strong> (stock Android Settings), open <strong>About</strong> and tap <strong>Build number</strong> until it says “You are now a developer”.</li>
+        <li>Back in <strong>More settings</strong>, search for <strong>Developer options</strong> and open it.</li>
+        <li>Turn on <strong>USB debugging</strong> and <strong>Wireless debugging</strong>, and allow it on your Wi-Fi network.</li>
+        <li>From a computer on the same Wi-Fi, run <code>adb connect &lt;box IP&gt;:5555</code> and accept the prompt on the box.</li>
+      </ol>
+      <h3>2. Install and set up</h3>
       <ol>
         <li>Download both APKs above, or build them from source.</li>
         <li>Install <strong>Box Tools</strong> first, then <strong>MiniCarHome</strong>.</li>
-        <li>Run the setup commands from the <a href="https://github.com/kynrek/MiniCarHome#install">README</a>.</li>
+        <li>Run the setup commands from the <a href="https://github.com/kynrek/MiniCarHome#2-install-the-apps-and-run-the-setup">README</a>.</li>
       </ol>
+      <p class="sub">Making MiniCarHome the home screen alone doesn’t need ADB (More settings → Apps → Default apps → Home app),
+        but the main window and the Wireless Debug shortcut need permissions that can only be granted over ADB.
+        The box switches Wireless debugging off when it reboots; Box Tools’ <strong>Wireless Debug</strong> icon turns it back on in one tap.</p>
       <p class="sub">Troubleshooting tips for the MMB box are in the <a href="https://github.com/kynrek/MiniCarHome#troubleshooting">README</a> too.</p>
     </div>
   </section>

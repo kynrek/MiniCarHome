@@ -92,6 +92,37 @@ The panel compacts itself as it narrows: shorter date, a smaller music card, sta
 
 ## Install
 
+### 1. Turn on Developer options and Wireless debugging on the box
+
+The setup is done from a computer with [ADB](https://developer.android.com/tools/releases/platform-tools)
+(Android's command-line tool) over Wi-Fi, so first unlock Developer options on the box. On the MMB box
+this took tapping the build number in **both** Settings apps:
+
+1. Open the box's own **Settings** app, go to **About**, and tap the build number repeatedly until it
+   says you're a developer.
+2. Open **More settings** (stock Android Settings), go to **About**, and tap **Build number** repeatedly
+   until it says "You are now a developer".
+3. Back in **More settings**, search for **Developer options** and open it.
+4. Turn on **USB debugging** and **Wireless debugging**. When asked "Allow wireless debugging on this
+   network?", choose **Allow**.
+5. Connect the box to the same Wi-Fi network as your computer, then from the computer run
+   `adb connect <box IP>:5555` (the box's IP is shown on the Wireless debugging screen) and accept the
+   "Allow debugging?" prompt on the box. If port 5555 doesn't answer, pair with the code shown under
+   **Pair device with pairing code** using `adb pair <IP>:<port>`, then `adb connect` the IP and port shown
+   at the top of the Wireless debugging screen.
+
+The box turns Wireless debugging off whenever it reboots. After setup, the **Wireless Debug** icon from
+Box Tools turns it back on in one tap.
+
+**Do you need ADB just to make MiniCarHome the home screen?** No. Once it's installed, you can pick it in
+**More settings → Apps → Default apps → Home app**. But MiniCarHome needs ADB for the rest of the setup:
+the hidden-API exemption and Box Tools' permission to switch Wireless debugging can only be granted over
+ADB. Without them, the main window and the Wireless Debug icon won't work. (Freeform windows, display over
+other apps, notification access and the accessibility service can also be switched on in the box's
+Settings menus, but ADB does it all at once.)
+
+### 2. Install the apps and run the setup
+
 Both apps are in this repo, prebuilt (`minicarhome/apk/`, `boxtools/apk/`) and as source. Install
 **Box Tools first**, because it defines the permission MiniCarHome uses, then run the one-time setup over ADB:
 
