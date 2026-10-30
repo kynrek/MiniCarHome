@@ -4,6 +4,8 @@ An easy-to-use, clutter-free home launcher for cars with Android "AI boxes", suc
 [**MMB MAX CarPlay AI Box for BMW 2023+ (iDrive 8/8.5/9), Android 13, 8+128GB**](https://www.amazon.com/dp/B0GXK6XD3N).
 That's the box this was built and tested on, and it works with the **2023 MINI Cooper SE**.
 
+Website: **https://minicarhome.kynrek.com**
+
 Your navigation app runs live in a big window, and a slim panel beside it holds the clock, weather,
 what's playing and the apps you actually use in the car. No ads, promo tiles or floating buttons.
 
@@ -159,3 +161,7 @@ the same key.
 ## License
 
 [MIT](LICENSE). Icons are from Google's Material icons (Apache 2.0).
+
+## Website
+
+`site/` is the static page served at https://minicarhome.kynrek.com (nginx:alpine; `site/nginx.conf`).

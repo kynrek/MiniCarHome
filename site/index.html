@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MiniCarHome</title>
+<meta name="description" content="An easy-to-use, clutter-free home launcher for cars with Android AI boxes. Built for the 2023 MINI Cooper's 1180×480 screen.">
+<meta property="og:title" content="MiniCarHome">
+<meta property="og:description" content="Clutter-free home launcher for Android car AI boxes: navigation in a big window, a slim panel for everything else.">
+<meta property="og:image" content="https://minicarhome.kynrek.com/screenshots/home.png">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='5' fill='%23163E48'/%3E%3Cpath fill='%23B6C580' d='M20.5 3l-.16.03L15 5.1 9 3 3.36 4.9c-.21.07-.36.25-.36.48V20.5c0 .28.22.5.5.5l.16-.03L9 18.9l6 2.1 5.64-1.9c.21-.07.36-.25.36-.48V3.5c0-.28-.22-.5-.5-.5zM15 19l-6-2.11V5l6 2.11V19z'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #f6f8f8; --surface: #ffffff; --text: #0e1416; --muted: #55666c; --line: #dde5e7;
+    --accent: #0f8c7a; --accent-ink: #ffffff; --shadow: 0 10px 30px rgba(14,20,22,.10);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0e1416; --surface: #1b2428; --text: #e8eef0; --muted: #9aa8ad; --line: #2a363b;
+            --accent: #6fd3c0; --accent-ink: #0e1416; --shadow: 0 10px 30px rgba(0,0,0,.45); }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 17px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  a { color: var(--accent); }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 20px; }
+  header.hero { padding: 64px 0 32px; }
+  .eyebrow { color: var(--muted); font-size: 14px; letter-spacing: .06em; text-transform: uppercase; margin: 0 0 8px; }
+  h1 { font-size: clamp(36px, 6vw, 56px); line-height: 1.05; margin: 0 0 16px; letter-spacing: -.02em; }
+  .lede { font-size: clamp(18px, 2.2vw, 21px); color: var(--muted); max-width: 46em; margin: 0 0 28px; }
+  .buttons { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 36px; }
+  .btn { display: inline-flex; align-items: center; gap: 8px; padding: 12px 20px; border-radius: 999px;
+         font-weight: 600; text-decoration: none; border: 1px solid var(--line); color: var(--text); background: var(--surface); }
+  .btn.primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+  .btn svg { width: 18px; height: 18px; fill: currentColor; }
+  figure { margin: 0; }
+  .shot { width: 100%; height: auto; display: block; border-radius: 14px; box-shadow: var(--shadow);
+          border: 1px solid var(--line); background: #000; }
+  figcaption { color: var(--muted); font-size: 14px; margin-top: 10px; }
+  section { padding: 40px 0; border-top: 1px solid var(--line); }
+  h2 { font-size: 28px; margin: 0 0 8px; letter-spacing: -.01em; }
+  .sub { color: var(--muted); margin: 0 0 24px; }
+  .grid { display: grid; gap: 20px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 20px; }
+  .card h3 { margin: 0 0 6px; font-size: 18px; }
+  .card p { margin: 0; color: var(--muted); font-size: 16px; }
+  .pair { display: grid; gap: 20px; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+  table { width: 100%; border-collapse: collapse; background: var(--surface); border: 1px solid var(--line);
+          border-radius: 14px; overflow: hidden; font-size: 16px; }
+  th, td { text-align: left; padding: 12px 16px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tr:last-child td { border-bottom: 0; }
+  th { color: var(--muted); font-weight: 600; font-size: 14px; }
+  .spec { display: flex; flex-wrap: wrap; gap: 10px; margin: 0 0 24px; padding: 0; list-style: none; }
+  .spec li { background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px; font-size: 15px; }
+  code { font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--surface);
+         border: 1px solid var(--line); border-radius: 6px; padding: 1px 6px; }
+  footer { padding: 40px 0 64px; color: var(--muted); font-size: 15px; border-top: 1px solid var(--line); }
+  @media (max-width: 600px) { header.hero { padding-top: 40px; } section { padding: 32px 0; } th, td { padding: 10px 12px; } }
+</style>
+</head>
+<body>
+<header class="hero">
+  <div class="wrap">
+    <p class="eyebrow">Open-source Android launcher</p>
+    <h1>MiniCarHome</h1>
+    <p class="lede">An easy-to-use, clutter-free home launcher for cars with Android “AI boxes”. Your navigation
+      runs live in a big window, and a slim panel beside it holds the clock, weather, what’s playing and the apps
+      you actually use in the car. No ads, promo tiles or floating buttons.</p>
+    <div class="buttons">
+      <a class="btn primary" href="https://github.com/kynrek/MiniCarHome">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        View on GitHub</a>
+      <a class="btn" href="https://github.com/kynrek/MiniCarHome/raw/main/minicarhome/apk/minicarhome.apk">Download MiniCarHome APK</a>
+      <a class="btn" href="https://github.com/kynrek/MiniCarHome/raw/main/boxtools/apk/boxtools.apk">Download Box Tools APK</a>
+    </div>
+    <figure>
+      <img class="shot" src="screenshots/home.png" width="1180" height="480"
+           alt="MiniCarHome: Google Maps in a large window on the left, with a panel on the right showing the time, weather, now playing and app shortcuts">
+      <figcaption>Google Maps in the main window; the panel on the right has the clock, weather, now playing, shortcuts and signal.</figcaption>
+    </figure>
+  </div>
+</header>
+
+<main>
+  <section>
+    <div class="wrap">
+      <h2>Made for the 2023 MINI Cooper</h2>
+      <p class="sub">Built and tested on the <a href="https://www.amazon.com/dp/B0GXK6XD3N">MMB MAX CarPlay AI Box for BMW 2023+
+        (iDrive 8/8.5/9), Android 13, 8+128GB</a>, which also works with the 2023 MINI Cooper SE. The layout adapts to other
+        screens, but sizes and spacing were tuned for the MINI.</p>
+      <ul class="spec">
+        <li>8.8-inch touchscreen</li><li>1180 × 480 pixels</li><li>120 dpi</li><li>Android 13–14</li>
+      </ul>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <h2>Features</h2>
+      <p class="sub">Everything you need while driving, nothing you don’t.</p>
+      <div class="grid">
+        <div class="card"><h3>A big main window</h3><p>Google Maps runs live in a window that fills everything the panel
+          doesn’t use, and opens by itself at startup. Pick any other app instead, such as Waze.</p></div>
+        <div class="card"><h3>Apps open in the main window</h3><p>Tap an app and it opens where Maps was, with the panel still
+          beside it. Home brings Maps back, still running, so you never lose your route.</p></div>
+        <div class="card"><h3>Now playing</h3><p>Artwork, title, progress bar and time remaining, with previous/next track,
+          seek back and forward (5–60 seconds) and play/pause. Works with Spotify, Podcast Addict, Audible and more.</p></div>
+        <div class="card"><h3>Clock and weather</h3><p>Large clock and date, with current conditions and the day’s high and low
+          from Open-Meteo when there’s room.</p></div>
+        <div class="card"><h3>Your shortcuts</h3><p>Add, remove and reorder the apps on the panel, plus a full app browser
+          with search and recently used apps.</p></div>
+        <div class="card"><h3>Assistant and signal</h3><p>One tap starts Google’s voice assistant (“navigate to…”, “call…”), and
+          Wi-Fi and cell indicators show your connection.</p></div>
+        <div class="card"><h3>Edge gestures</h3><p>The Box Tools companion replaces the box’s floating ball: swipe in from an
+          edge for Back, swipe up for Home, swipe up and pause for Recent apps.</p></div>
+        <div class="card"><h3>Remembers everything</h3><p>Every setting is saved on the box and survives reboots.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <h2>Apps open in the main window</h2>
+      <p class="sub">Open another app from the panel and it takes over the main window, with the panel still beside it.</p>
+      <figure><img class="shot" src="screenshots/pane.png" width="1180" height="480" loading="lazy"
+           alt="The Play Store open in the main window, with the MiniCarHome panel still on the right"></figure>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <h2>Make it yours</h2>
+      <p class="sub">Tap the gear at the bottom of the panel.</p>
+      <div class="pair">
+        <figure><img class="shot" src="screenshots/settings.png" width="1180" height="480" loading="lazy" alt="Settings in the panel">
+          <figcaption>Settings open right in the panel, so Maps stays visible.</figcaption></figure>
+        <figure><img class="shot" src="screenshots/edit.png" width="1180" height="480" loading="lazy" alt="Editing shortcuts">
+          <figcaption>Edit shortcuts: move, remove or add apps.</figcaption></figure>
+      </div>
+      <p></p>
+      <table>
+        <tr><th>Setting</th><th>Options</th></tr>
+        <tr><td>Icons per row</td><td>2–5, which sets the panel’s width (default 3). The main window grows into any space freed up.</td></tr>
+        <tr><td>Side</td><td>Panel on the left or right</td></tr>
+        <tr><td>Main display app</td><td>Any app; Google Maps by default</td></tr>
+        <tr><td>Open apps in main window</td><td>On / off</td></tr>
+        <tr><td>Clock &amp; date, Media, Assistant</td><td>Each on / off</td></tr>
+        <tr><td>Media buttons</td><td>Both (track + seek), Track only or Seek only</td></tr>
+        <tr><td>Seek seconds</td><td>5, 10, 15, 30 or 60</td></tr>
+        <tr><td>Signal</td><td>Off, top or bottom</td></tr>
+        <tr><td>Shortcuts</td><td>Edit, or reset to the defaults</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <h2>Narrow or wide, left or right</h2>
+      <p class="sub">The panel compacts itself as it narrows, and the main window takes the rest.</p>
+      <div class="pair">
+        <figure><img class="shot" src="screenshots/two.png" width="1180" height="480" loading="lazy" alt="Two icons per row">
+          <figcaption>2 icons per row: the narrowest panel.</figcaption></figure>
+        <figure><img class="shot" src="screenshots/left.png" width="1180" height="480" loading="lazy" alt="Panel on the left">
+          <figcaption>Panel on the left side.</figcaption></figure>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <h2>All your apps</h2>
+      <p class="sub">A full-screen app browser with search, recently used apps and every app A–Z.</p>
+      <figure><img class="shot" src="screenshots/browser.png" width="1180" height="480" loading="lazy" alt="App browser"></figure>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <h2>Install</h2>
+      <p class="sub">MiniCarHome needs a one-time setup from a computer with ADB, because it uses Android features that
+        ordinary apps can’t switch on themselves (freeform windows and a few permissions).</p>
+      <ol>
+        <li>Download both APKs above, or build them from source.</li>
+        <li>Install <strong>Box Tools</strong> first, then <strong>MiniCarHome</strong>.</li>
+        <li>Run the setup commands from the <a href="https://github.com/kynrek/MiniCarHome#install">README</a>.</li>
+      </ol>
+      <p class="sub">Troubleshooting tips for the MMB box are in the <a href="https://github.com/kynrek/MiniCarHome#troubleshooting">README</a> too.</p>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    MiniCarHome is free and open source under the <a href="https://github.com/kynrek/MiniCarHome/blob/main/LICENSE">MIT license</a>.
+    Not affiliated with MINI, BMW, Google or MMB.
+    · <a href="https://github.com/kynrek/MiniCarHome">github.com/kynrek/MiniCarHome</a>
+  </div>
+</footer>
+</body>
+</html>
