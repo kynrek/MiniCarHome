@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.kynrek.minicarhome"
+    android:versionCode="1"
+    android:versionName="1.0">
+
+    <uses-sdk android:minSdkVersion="29" android:targetSdkVersion="34" />
+
+    <!-- Panel and app browser are overlays above Maps' touch-blocking input sink.
+         Granted over ADB: appops set com.kynrek.minicarhome SYSTEM_ALERT_WINDOW allow -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+
+    <!-- Ask Box Tools' gesture service to tap the Maps window's close button when the panel resizes. -->
+    <uses-permission android:name="local.boxtools.permission.CONTROL" />
+
+    <!-- Signal indicators. READ_PHONE_STATE (for LTE/5G) is granted over ADB:
+         pm grant com.kynrek.minicarhome android.permission.READ_PHONE_STATE -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!-- Weather from Open-Meteo. Coarse location granted over ADB:
+         pm grant com.kynrek.minicarhome android.permission.ACCESS_COARSE_LOCATION -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
+
+    <application android:label="MiniCarHome" android:icon="@drawable/ic_launcher" android:allowBackup="false">
+
+        <activity android:name=".HomeActivity"
+            android:label="MiniCarHome"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen"
+            android:launchMode="singleTask"
+            android:stateNotNeeded="true"
+            android:resizeableActivity="false"
+            android:screenOrientation="sensorLandscape"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode|density"
+            android:excludeFromRecents="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.HOME" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- Lets the home screen read the playing track. Granted over ADB:
+             cmd notification allow_listener com.kynrek.minicarhome/com.kynrek.minicarhome.MediaListener -->
+        <service android:name=".MediaListener"
+            android:label="MiniCarHome now playing"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+    </application>
+</manifest>
