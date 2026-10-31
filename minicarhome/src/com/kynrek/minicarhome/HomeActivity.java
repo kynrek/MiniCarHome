@@ -202,6 +202,14 @@ public class HomeActivity extends Activity {
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
+        // Testing hook: adb shell am start -n com.kynrek.minicarhome/.HomeActivity --es launch <package/activity>
+        // opens that app the way tapping its icon does.
+        String target = intent.getStringExtra("launch");
+        ComponentName cn = target == null ? null : ComponentName.unflattenFromString(target);
+        if (cn != null) {
+            main.postDelayed(() -> launch(cn), 300);
+            return;
+        }
         // Home pressed (or the Home gesture): close the app browser and bring the Maps window back.
         hideBrowser();
         main.postDelayed(this::ensureMaps, 250);
@@ -283,11 +291,17 @@ public class HomeActivity extends Activity {
             return;
         }
         startPane(i, WINDOWING_MODE_FREEFORM);
-        Rect bounds = mapsBounds();
-        bounds.bottom -= sysDp(FREEFORM_CAPTION_DP);   // the caption bar pushes the app down by its height
+        Rect bounds = captionedBounds();
         for (long delay : new long[]{1500, 3000, 5000}) {   // the main screen's task appears after the splash
             main.postDelayed(() -> { if (pkg.equals(paneTarget)) fitTask(pkg, bounds); }, delay);
         }
+    }
+
+    /** The pane for a freeform window: its caption bar pushes the app down by the bar's height. */
+    private Rect captionedBounds() {
+        Rect r = mapsBounds();
+        r.bottom -= sysDp(FREEFORM_CAPTION_DP);
+        return r;
     }
 
     // ---- Shizuku (optional) ----
@@ -325,7 +339,14 @@ public class HomeActivity extends Activity {
         return t == null ? null : t.taskId;
     }
 
+    /**
+     * Multi-window would letterbox the task's top screen: it's locked to portrait in its manifest, or marked as
+     * not resizable (such screens usually lock orientation from code, like TeamViewer's EULA).
+     */
     private boolean portraitOnly(android.app.ActivityManager.RunningTaskInfo task) {
+        try {
+            if (android.app.TaskInfo.class.getField("resizeMode").getInt(task) == 0) return true;   // RESIZE_MODE_UNRESIZEABLE
+        } catch (ReflectiveOperationException | RuntimeException ignored) { }
         try {
             int o = pm.getActivityInfo(task.topActivity, 0).screenOrientation;
             return o == android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
@@ -362,40 +383,97 @@ public class HomeActivity extends Activity {
     }
 
     /**
-     * Put the app's task in the pane at its full size with a WindowContainerTransaction: caption-less
-     * multi-window like any other app, except for apps locked to portrait, which multi-window letterboxes into a
-     * narrow column. Those stay freeform, which ignores the lock; Android keeps a freeform window below the
-     * status bar, so they keep their caption bar there. If the transaction is refused, just resize the task.
+     * Put the app's task in the pane at its full size: caption-less multi-window like any other app. Screens
+     * locked to portrait get letterboxed into a narrow column there, so those get a freeform window instead,
+     * which ignores the lock (and keeps a ▭ ✕ caption bar; Android keeps freeform windows below the status
+     * bar). The lock is often set from code, so after switching, MiniCarHome checks whether Android letterboxed
+     * the app and moves it to freeform if so.
      */
     private void fitTask(String pkg, Rect captioned) {
         android.app.ActivityManager.RunningTaskInfo task = findTaskInfo(pkg);
         if (task == null) return;
+        if (portraitOnly(task)) {
+            setTaskMode(task, WINDOWING_MODE_FREEFORM, captioned);
+            return;
+        }
+        setTaskMode(task, WINDOWING_MODE_MULTI_WINDOW, mapsBounds());
+        new Thread(() -> {
+            // Letterboxed twice in a row: a portrait splash screen (Audible's) is letterboxed only briefly, and a
+            // sign-in screen can take over a few seconds later (Netflix's).
+            boolean before = false;
+            for (long wait : new long[]{1200, 1500, 1500, 2000, 2000}) {
+                SystemClock.sleep(wait);
+                if (!pkg.equals(paneTarget)) return;
+                boolean now = letterboxed(pkg);
+                boolean twice = now && before;
+                before = now;
+                if (!twice) continue;
+                Log.i(TAG, pkg + " is letterboxed in the pane; using a freeform window");
+                main.post(() -> {
+                    android.app.ActivityManager.RunningTaskInfo t = findTaskInfo(pkg);
+                    if (t != null && pkg.equals(paneTarget)) setTaskMode(t, WINDOWING_MODE_FREEFORM, captionedBounds());
+                });
+                return;
+            }
+        }, "letterbox-check").start();
+    }
+
+    /** Set a task's window mode and bounds with a WindowContainerTransaction, or at least resize it. */
+    private void setTaskMode(android.app.ActivityManager.RunningTaskInfo task, int mode, Rect bounds) {
         try {
             Object atm = activityTasks();
             Object token = android.app.TaskInfo.class.getField("token").get(task);
             Class<?> tokenClass = Class.forName("android.window.WindowContainerToken");
             Class<?> wctClass = Class.forName("android.window.WindowContainerTransaction");
             Object wct = wctClass.getConstructor().newInstance();
-            Rect bounds = captioned;
-            if (!portraitOnly(task)) {
-                wctClass.getMethod("setWindowingMode", tokenClass, int.class).invoke(wct, token, WINDOWING_MODE_MULTI_WINDOW);
-                bounds = mapsBounds();
-            }
+            wctClass.getMethod("setWindowingMode", tokenClass, int.class).invoke(wct, token, mode);
             wctClass.getMethod("setBounds", tokenClass, Rect.class).invoke(wct, token, bounds);
             Object controller = atm.getClass().getMethod("getWindowOrganizerController").invoke(atm);
             IBinder b = new ShizukuBinderWrapper((IBinder) controller.getClass().getMethod("asBinder").invoke(controller));
             Object wo = Class.forName("android.window.IWindowOrganizerController$Stub")
                     .getMethod("asInterface", IBinder.class).invoke(null, b);
             wo.getClass().getMethod("applyTransaction", wctClass).invoke(wo, wct);
-            return;
+            if (mode != WINDOWING_MODE_FREEFORM) return;
+            // Switching to freeform keeps the old size and moves it below the status bar; resize it after.
         } catch (ReflectiveOperationException | RuntimeException e) {
             Log.w(TAG, "window transaction failed; resizing instead", e);
         }
         try {
             Object atm = activityTasks();
-            atm.getClass().getMethod("resizeTask", int.class, Rect.class, int.class).invoke(atm, task.taskId, captioned, 0);
+            atm.getClass().getMethod("resizeTask", int.class, Rect.class, int.class).invoke(atm, task.taskId, bounds, 0);
         } catch (ReflectiveOperationException | RuntimeException e) {
             Log.w(TAG, "resizeTask failed", e);
+        }
+    }
+
+    /** Whether the app's top screen is letterboxed, from "dumpsys activity activities" run through Shizuku. */
+    private boolean letterboxed(String pkg) {
+        String out = shell("dumpsys", "activity", "activities");
+        java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile("\\* Hist +#\\d+: ActivityRecord\\{\\S+ u0 " + java.util.regex.Pattern.quote(pkg) + "/").matcher(out);
+        int at = m.find() ? m.start() + 1 : -1;   // its task's top activity comes first
+        if (at < 0) return false;
+        int next = out.indexOf("* Hist", at);
+        String block = out.substring(at, next < 0 ? out.length() : next);
+        return block.contains("areBoundsLetterboxed=true");
+    }
+
+    /** Run a command as the shell user through Shizuku and return its output ("" on failure). */
+    private static String shell(String... cmd) {
+        try {
+            Method m = Shizuku.class.getDeclaredMethod("newProcess", String[].class, String[].class, String.class);
+            m.setAccessible(true);
+            Process p = (Process) m.invoke(null, cmd, null, null);
+            java.io.ByteArrayOutputStream buf = new java.io.ByteArrayOutputStream();
+            try (InputStream in = p.getInputStream()) {
+                byte[] chunk = new byte[16384];
+                for (int n; (n = in.read(chunk)) > 0; ) buf.write(chunk, 0, n);
+            }
+            p.waitFor();
+            return buf.toString("UTF-8");
+        } catch (Exception e) {
+            Log.w(TAG, "shell " + cmd[0] + " failed", e);
+            return "";
         }
     }
 
@@ -520,6 +598,11 @@ public class HomeActivity extends Activity {
         main.postDelayed(() -> {
             if (pkg.equals(paneTarget) && !pkg.equals(reopening)) startPane(i, WINDOWING_MODE_MULTI_WINDOW);
         }, 1000);
+        // Some apps open their real screen in another task a moment later (Files, TeamViewer), which misses the
+        // pane. With Shizuku, snap whatever task the app ended up in into the pane.
+        main.postDelayed(() -> {
+            if (pkg.equals(paneTarget) && !pkg.equals(reopening) && shizukuReady()) fitTask(pkg, captionedBounds());
+        }, 2500);
     }
 
     private void startPane(Intent i, int mode) {

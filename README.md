@@ -179,6 +179,7 @@ it, start it, and allow MiniCarHome when Shizuku asks:
 adb install shizuku.apk          # from github.com/RikkaApps/Shizuku/releases
 adb shell "$(adb shell pm path moe.shizuku.privileged.api | cut -d: -f2 | xargs dirname)/lib/arm64/libshizuku.so"
 adb shell pm grant moe.shizuku.privileged.api android.permission.WRITE_SECURE_SETTINGS   # lets it start on boot
+adb shell settings put global force_resizable_activities 1   # lets apps marked non-resizable (TeamViewer) use a window
 ```
 
 Shizuku stops when the box reboots. Start it again from the Shizuku app (Start, via wireless debugging, which
@@ -200,9 +201,13 @@ which also turns Wireless debugging off. Tap **Wireless Debug** (Box Tools) to t
 **An app opens full screen instead of in the main window.** Android won't move a window that's already
 open. Swipe the app away in Recents once and it will open in the main window from then on. Some apps (Aladdin
 Connect, for one) open their main screen as a new task from a splash screen, which Android sizes to the whole
-screen. MiniCarHome notices the first time. With [Shizuku](#optional-shizuku) running it moves those apps into
-the main window, caption-free like any other app; without it they open full screen. Apps locked to portrait
-(Aladdin Connect is) keep a ▭ ✕ bar: without one, Android squeezes them into a narrow portrait column.
+screen. With [Shizuku](#optional-shizuku) running, MiniCarHome moves whatever window an app ends up in into the
+main window, caption-free like any other app; without it those apps open full screen.
+
+**An app keeps a ▭ ✕ bar.** It's locked to portrait (Aladdin Connect, TeamViewer, US Mobile, APKPure and
+Netflix's sign-in screens are). Without the bar Android squeezes such apps into a narrow portrait column, so
+MiniCarHome checks for that (with Shizuku) and gives them a freeform window, which fills the main window but
+keeps the bar.
 
 ## Build
 
