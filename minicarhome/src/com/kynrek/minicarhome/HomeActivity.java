@@ -603,7 +603,7 @@ public class HomeActivity extends Activity {
     // The picture lives in the app's external files folder so it can also be pushed over ADB:
     //   adb push picture.jpg /sdcard/Android/data/com.kynrek.minicarhome/files/wallpaper.jpg
     private static final int PICK_WALLPAPER = 41;
-    private static final int WALLPAPER_SCRIM = 0xA60E1416;   // darkens the picture so text stays readable
+    private static final int WALLPAPER_SCRIM = 0x660E1416;   // darkens the picture a little so text stays readable
     private Bitmap wallpaperCache;
     private long wallpaperStamp;
 
@@ -1122,7 +1122,7 @@ public class HomeActivity extends Activity {
         boolean wide = n >= 3;
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
-        card.setBackground(rounded(CARD, 16));
+        card.setBackground(rounded(wallpaperFile().exists() ? 0xB31B2428 : CARD, 16));   // let a wallpaper show through
         card.setPadding(dp(10), dp(10), dp(10), dp(wide ? 10 : 6));
 
         LinearLayout top = new LinearLayout(this);
