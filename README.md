@@ -35,8 +35,9 @@ app, anything).
 ### Apps open in the main window
 Tap an app in the panel or the app list and it opens **in the main window**, where Maps was, with the
 panel still beside it. Open another app and it replaces the previous one. **Home** brings Maps back, and
-Maps keeps running underneath the whole time, so you don't lose your route. (Turn this off in settings
-to open apps full screen instead.)
+Maps keeps running underneath the whole time, so you don't lose your route. The first shortcut is always the
+main display app's own icon, and tapping it does the same: it closes the app in the main window and brings
+Maps (or Waze, or whichever app you chose) back. (Turn this off in settings to open apps full screen instead.)
 
 ![An app in the main window](docs/screenshots/pane.png)
 <sub>The Play Store opened from the panel, running in the main window.</sub>
@@ -45,28 +46,34 @@ Android's own Settings app is the one exception: Android hides every app's overl
 in front, so the panel disappears until you leave Settings.
 
 ### The panel
-- **Clock and date**, with **weather** beside it (current conditions, high and low) when the panel is
+- **Clock and date** (12-hour with AM/PM, or 24-hour), with **weather** beside it (current conditions, high and low) when the panel is
   3 or more icons wide.
 - **Now playing**: artwork, title, a progress bar and time remaining, and controls for whatever is
   playing (Podcast Addict, Audible, Spotify, Symfonium…): previous/next track (|◀ ▶|), seek back and
   forward (↺ ↻) and play/pause. Tap the card to open that app.
 - **Shortcuts** to your car apps, scrolling if they don't fit, plus **All apps**.
-- **Assistant button**: starts Google's voice assistant ("navigate to…", "call…").
-- **Wi-Fi and cell signal** with bars, plus the carrier and network type.
+- **Voice button** (off by default): say "navigate to In-N-Out" (or just "In-N-Out"). The panel shows what it
+  heard while the map stays in view, and the route starts in Waze or Google Maps straight away, with no results
+  list to tap through. Speech is recognized on the box. Or set it to open Android's assistant or an app you choose
+  (Gemini, Home Assistant…).
+- **Wi-Fi and cell signal** with bars and the network type (optional; off by default, since Android's status bar
+  already shows them).
 
 ### Settings (gear, bottom left)
 | Setting | Options |
 |---|---|
-| Icons per row | 2–5; sets the panel's width (default 3). The main window grows into any space freed up |
+| Icons per row | 2–4; sets the panel's width (default 3). The main window grows into any space freed up |
 | Side | Panel on the left or right |
 | Display size (other apps) | Android's display density: 120, 140, 160 (default), 180 or 200 dpi. Makes Maps, the music player and other apps bigger or smaller; the panel keeps its size |
 | Wallpaper | Choose a picture for the panel's background (shown with a dark tint so text stays readable), or None |
 | Main display app | Any app; Google Maps by default |
 | Open apps in main window | On / off |
-| Clock & date, Media, Assistant | Each on / off |
+| Clock & date, Media | Each on / off |
+| 24-hour time | Off (12-hour with AM/PM, default) or on |
+| Assistant | Off by default. When on: Built-in voice navigation (default), Android (the system assistant) or App (any app you pick) |
 | Media buttons | Both (track + seek, default), Track only or Seek only |
 | Seek seconds | 5, 10, 15 (default), 30 or 60 |
-| Signal | Off, top or bottom |
+| Signal | Off (default), top or bottom |
 | Edit shortcuts | Move (◀ ▶), remove (✕) and add (+, from the full app list) |
 | Reset shortcuts | Back to the default list |
 
@@ -150,6 +157,7 @@ adb shell cmd notification allow_listener com.kynrek.minicarhome/com.kynrek.mini
 adb shell pm grant com.kynrek.minicarhome android.permission.READ_PHONE_STATE
 adb shell pm grant com.kynrek.minicarhome android.permission.ACCESS_COARSE_LOCATION
 adb shell pm grant com.kynrek.minicarhome android.permission.WRITE_SECURE_SETTINGS   # Display size setting
+adb shell pm grant com.kynrek.minicarhome android.permission.RECORD_AUDIO            # voice navigation (or allow on first use)
 adb shell settings put secure icon_blacklist clock          # optional: hide the status-bar clock
 adb shell cmd package set-home-activity com.kynrek.minicarhome/.HomeActivity
 
@@ -189,14 +197,17 @@ This writes `minicarhome/out/minicarhome.apk`, signed with `~/.android/debug.key
 
 ## How it works
 
-- The main window is a **freeform window**. MiniCarHome opens apps there with explicit launch bounds,
-  which needs the developer setting `enable_freeform_support` and a hidden-API exemption for
+- The main window is a **multi-window task with launch bounds**, which (unlike a freeform window) has no
+  caption bar with ▭ and ✕. Android's window shell only reliably shows a new window in that mode if it starts
+  out as freeform, so each app opens as a freeform window and is switched to multi-window a second later.
+  This needs the developer setting `enable_freeform_support` and a hidden-API exemption for
   `ActivityOptions.setLaunchWindowingMode`.
 - The panel and app browser are **overlay windows**. Since Android 14, Google Maps carries a full-screen
   input sink (touch-opaque activities) that swallows touches meant for the home screen underneath it.
-- Android won't resize another app's open window, so on a width or side change MiniCarHome asks Box
-  Tools' accessibility service to tap the old window's ✕, then reopens the app at the new size.
-- The panel is drawn at a fixed scale (the box's original 120 dpi), so changing Android's display size or font
+- Android won't resize another app's open window, so on a width or side change MiniCarHome switches the old
+  window back to freeform, asks Box Tools' accessibility service to tap its ✕, then reopens the app at the
+  new size.
+- The panel is drawn at a fixed scale (1.7× the box's original 120 dpi), so changing Android's display size or font
   size only resizes the other apps. Display size uses `IWindowManager.setForcedDisplayDensityForUser`, which
   needs `WRITE_SECURE_SETTINGS` and a hidden-API exemption, both set over ADB.
 - A wallpaper is stored at `/sdcard/Android/data/com.kynrek.minicarhome/files/wallpaper.jpg`, so you can also
