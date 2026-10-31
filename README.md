@@ -73,7 +73,7 @@ in front, so the panel disappears until you leave Settings.
 | Assistant | Off by default. When on: Built-in voice navigation (default), Android (the system assistant) or App (any app you pick) |
 | Media buttons | Both (track + seek, default), Track only or Seek only |
 | Seek seconds | 5, 10, 15 (default), 30 or 60 |
-| Signal | Off (default), top or bottom |
+| Signal | Off (default; Android's own icons), top (bigger Wi-Fi and cell icons that replace Android's) or bottom |
 | Edit shortcuts | Move (◀ ▶), remove (✕) and add (+, from the full app list) |
 | Reset shortcuts | Back to the default list |
 

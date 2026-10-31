@@ -194,7 +194,8 @@ public class HomeActivity extends Activity {
         panel = new FrameLayout(this);   // one overlay window for the panel's life; rebuilds swap what's inside
         panel.addView(buildPanel());
         main.postDelayed(this::ensureMaps, 800);
-        if (!prefs.contains("density")) setDensity(DEFAULT_DENSITY);   // first run: bigger than the box's 120 dpi
+        if (!prefs.contains("density")) setDensity(DEFAULT_DENSITY);
+        syncStatusIcons();   // first run: bigger than the box's 120 dpi
     }
 
     private final android.content.BroadcastReceiver appsChanged = new android.content.BroadcastReceiver() {
@@ -743,7 +744,24 @@ public class HomeActivity extends Activity {
 
     private void setSignalPlace(String place) {
         prefs.edit().putString("signals", place).apply();
+        syncStatusIcons();
         rebuildPanel();
+    }
+
+    private static final List<String> STATUS_SIGNAL_ICONS = java.util.Arrays.asList("wifi", "mobile");
+
+    /** Android's Wi-Fi and cell icons are hidden while the panel shows its bigger ones at the top. */
+    private void syncStatusIcons() {
+        boolean hide = "top".equals(signalPlace());
+        try {
+            String saved = Settings.Secure.getString(getContentResolver(), "icon_blacklist");
+            java.util.Set<String> icons = new java.util.LinkedHashSet<>();
+            if (saved != null) for (String icon : saved.split(",")) if (!icon.trim().isEmpty()) icons.add(icon.trim());
+            boolean changed = hide ? icons.addAll(STATUS_SIGNAL_ICONS) : icons.removeAll(STATUS_SIGNAL_ICONS);
+            if (changed) Settings.Secure.putString(getContentResolver(), "icon_blacklist", TextUtils.join(",", icons));
+        } catch (SecurityException e) {
+            Log.w(TAG, "can't change the status bar icons without WRITE_SECURE_SETTINGS", e);
+        }
     }
 
     private void setPanelLeft(boolean left) {
@@ -909,11 +927,13 @@ public class HomeActivity extends Activity {
         header.addView(clockBox, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
         weatherTemp = null;
         weatherRange = null;
+        boolean statusIcons = "top".equals(signalPlace());
         if (n >= 3) {   // weather needs at least three icons' width beside the clock
             LinearLayout wx = new LinearLayout(this);
             wx.setOrientation(LinearLayout.HORIZONTAL);
             wx.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
-            wx.setPadding(dp(6), statusBarHeight(), dp(4), 0);   // keep clear of the status bar's icons
+            // Below the status bar's icons, or below the panel's own when they replace them.
+            wx.setPadding(dp(2), statusIcons ? dp(STATUS_ROW_DP) : statusBarHeight(), 0, 0);   // tight: "10:30 PM Oct 31" needs the room
             weatherTemp = text("", 20, TEXT);
             weatherTemp.setSingleLine(true);
             wx.addView(weatherTemp);
@@ -925,11 +945,15 @@ public class HomeActivity extends Activity {
             }
             header.addView(wx);
         }
-        if (showClock || weatherTemp != null) p.addView(header);
-
-        if ("top".equals(signalPlace())) {
-            View sig = n >= 3 ? signalsRow() : signalsStack();
-            p.addView(sig, marginTop(LinearLayout.LayoutParams.MATCH_PARENT, 4));
+        if (statusIcons) {
+            // Over the header's top-right corner, so they don't take width from the clock and date.
+            FrameLayout top = new FrameLayout(this);
+            top.addView(header);
+            top.addView(statusSignals(), new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.END));
+            p.addView(top);
+        } else if (showClock || weatherTemp != null) {
+            p.addView(header);
         }
         if (prefs.getBoolean("show_media", true) && !settingsOpen) {   // settings get the room while open
             p.addView(buildMediaCard(n), marginTop(LinearLayout.LayoutParams.MATCH_PARENT, 4));
@@ -1375,6 +1399,27 @@ public class HomeActivity extends Activity {
         cellLabel = text("", 13, DIM);
     }
 
+    /** Bigger Wi-Fi and cell icons where Android's sit in the status bar. */
+    private View statusSignals() {
+        newSignalViews();
+        wifiBars = new SignalBars(this, TEXT, STATUS_ICON_OFF);
+        wifiBars.setFan(true);
+        cellBars = new SignalBars(this, TEXT, STATUS_ICON_OFF);
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
+        row.setPadding(0, dp(STATUS_ROW_DP - 19), sysDp(STATUS_ICON_DP), 0);   // Android's location icon stays at the far right
+        row.addView(wifiBars, new LinearLayout.LayoutParams(dp(26), dp(19)));
+        LinearLayout.LayoutParams cell = new LinearLayout.LayoutParams(dp(22), dp(17));
+        cell.leftMargin = dp(8);
+        row.addView(cellBars, cell);
+        return row;
+    }
+
+    private static final int STATUS_ROW_DP = 22;
+    private static final int STATUS_ICON_DP = 44;            // room for Android's location icon
+    private static final int STATUS_ICON_OFF = 0x59FFFFFF;   // unfilled bars: see-through white, as Android draws them
+
     /** Wi-Fi and cell side by side (wide panels). */
     private View signalsRow() {
         newSignalViews();
@@ -1599,7 +1644,7 @@ public class HomeActivity extends Activity {
         SignalStrength ss = tel == null ? null : tel.getSignalStrength();
         String operator = tel == null ? "" : tel.getNetworkOperatorName();
         if (ss != null && operator != null && !operator.isEmpty()) {
-            cellBars.setLevel(ss.getLevel());   // 0..4
+            cellBars.setLevel(Math.max(1, ss.getLevel()));   // 0..4; one bar while connected, like Android's
             String type = networkType(tel);
             if (columns <= 3) cellLabel.setText(type.isEmpty() ? "Cell" : type);   // narrower panels: just "LTE"
             else cellLabel.setText(type.isEmpty() ? operator.trim() : operator.trim() + " · " + type);
