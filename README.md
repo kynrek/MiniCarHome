@@ -59,6 +59,8 @@ in front, so the panel disappears until you leave Settings.
 |---|---|
 | Icons per row | 2–5; sets the panel's width (default 3). The main window grows into any space freed up |
 | Side | Panel on the left or right |
+| Display size (other apps) | Android's display density: 120, 140, 160 (default), 180 or 200 dpi. Makes Maps, the music player and other apps bigger or smaller; the panel keeps its size |
+| Wallpaper | Choose a picture for the panel's background (shown with a dark tint so text stays readable), or None |
 | Main display app | Any app; Google Maps by default |
 | Open apps in main window | On / off |
 | Clock & date, Media, Assistant | Each on / off |
@@ -142,11 +144,12 @@ adb install minicarhome/apk/minicarhome.apk
 
 # MiniCarHome
 adb shell settings put global enable_freeform_support 1
-adb shell settings put global hidden_api_blacklist_exemptions "Landroid/app/ActivityOptions;->setLaunchWindowingMode"
+adb shell settings put global hidden_api_blacklist_exemptions "Landroid/app/ActivityOptions;->setLaunchWindowingMode,Landroid/view/IWindowManager"
 adb shell appops set com.kynrek.minicarhome SYSTEM_ALERT_WINDOW allow
 adb shell cmd notification allow_listener com.kynrek.minicarhome/com.kynrek.minicarhome.MediaListener 0
 adb shell pm grant com.kynrek.minicarhome android.permission.READ_PHONE_STATE
 adb shell pm grant com.kynrek.minicarhome android.permission.ACCESS_COARSE_LOCATION
+adb shell pm grant com.kynrek.minicarhome android.permission.WRITE_SECURE_SETTINGS   # Display size setting
 adb shell settings put secure icon_blacklist clock          # optional: hide the status-bar clock
 adb shell cmd package set-home-activity com.kynrek.minicarhome/.HomeActivity
 
@@ -193,6 +196,11 @@ This writes `minicarhome/out/minicarhome.apk`, signed with `~/.android/debug.key
   input sink (touch-opaque activities) that swallows touches meant for the home screen underneath it.
 - Android won't resize another app's open window, so on a width or side change MiniCarHome asks Box
   Tools' accessibility service to tap the old window's ✕, then reopens the app at the new size.
+- The panel is drawn at a fixed scale (the box's original 120 dpi), so changing Android's display size or font
+  size only resizes the other apps. Display size uses `IWindowManager.setForcedDisplayDensityForUser`, which
+  needs `WRITE_SECURE_SETTINGS` and a hidden-API exemption, both set over ADB.
+- A wallpaper is stored at `/sdcard/Android/data/com.kynrek.minicarhome/files/wallpaper.jpg`, so you can also
+  `adb push` a picture there.
 - Weather comes from [Open-Meteo](https://open-meteo.com/) (free, no key) for the box's location,
   rounded to about 1 km.
 - Launcher icons that only bounce to another screen (Podcast Addict) are mapped to their real screen

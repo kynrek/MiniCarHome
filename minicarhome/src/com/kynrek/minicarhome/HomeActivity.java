@@ -9,10 +9,14 @@ import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.PixelFormat;
 import android.graphics.Rect;
 import android.graphics.Typeface;
+import android.graphics.drawable.BitmapDrawable;
+import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
+import android.graphics.drawable.LayerDrawable;
 import android.graphics.drawable.GradientDrawable;
 import android.media.MediaMetadata;
 import android.media.session.MediaController;
@@ -55,6 +59,9 @@ import android.widget.TextClock;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.InputStream;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -75,7 +82,7 @@ public class HomeActivity extends Activity {
     private static final String MAPS = "com.google.android.apps.maps";
     private static final int PICK_NONE = 0, PICK_SHORTCUT = 1, PICK_NAV = 2;
     private static final int WINDOWING_MODE_FREEFORM = 5;
-    private static final int FREEFORM_CAPTION_DP = 24;   // measured: 18 px at this box's 0.75 density
+    private static final int FREEFORM_CAPTION_DP = 24;   // measured: 18 px at 120 dpi; scales with display size
     private static final int MAX_MAPS_ATTEMPTS = 30;
     private static final long MAPS_RETRY_MS = 2000;
     private int mapsAttempts;
@@ -148,6 +155,7 @@ public class HomeActivity extends Activity {
         setContentView(buildBackdrop());
         panel = buildPanel();
         main.postDelayed(this::ensureMaps, 800);
+        if (!prefs.contains("density")) setDensity(DEFAULT_DENSITY);   // first run: bigger than the box's 120 dpi
     }
 
     @Override
@@ -205,7 +213,7 @@ public class HomeActivity extends Activity {
         int left = panelLeft ? screen.width() - mapsWidth : 0;
         // The freeform caption bar sits above the app and pushes it down by its height, so leave room for it
         // or the bottom of Maps (e.g. the Start button) runs off the screen.
-        return new Rect(left, 0, left + mapsWidth, screen.height() - dp(FREEFORM_CAPTION_DP));
+        return new Rect(left, 0, left + mapsWidth, screen.height() - sysDp(FREEFORM_CAPTION_DP));
     }
 
     /**
@@ -503,7 +511,7 @@ public class HomeActivity extends Activity {
         wifiBars = cellBars = null;   // recreated below only if the indicators are shown
         LinearLayout p = new LinearLayout(this);
         p.setOrientation(LinearLayout.VERTICAL);
-        p.setBackgroundColor(BG);
+        p.setBackground(panelBackground());
         // Extra padding on the screen-edge side keeps buttons clear of the edge Back-gesture strip.
         p.setPadding(dp(panelLeft ? PAD_EDGE : PAD_INNER), dp(8), dp(panelLeft ? PAD_INNER : PAD_EDGE), dp(8));
 
@@ -570,6 +578,96 @@ public class HomeActivity extends Activity {
 
         p.addView(buildBottomBar(n), new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         return p;
+    }
+
+    // ---- Display size ----
+    // Android's display density, which sizes every other app (Maps, the music player...). The panel itself
+    // keeps the same size at any density (see UI_SCALE). Needs WRITE_SECURE_SETTINGS, granted over ADB.
+    private static final int DEFAULT_DENSITY = 160;
+    private static final int[] DENSITIES = {120, 140, 160, 180, 200};
+
+    private void setDensity(int dpi) {
+        try {
+            Object wms = Class.forName("android.view.WindowManagerGlobal").getMethod("getWindowManagerService").invoke(null);
+            wms.getClass().getMethod("setForcedDisplayDensityForUser", int.class, int.class, int.class)
+                    .invoke(wms, 0 /* default display */, dpi, 0 /* the box has one user */);
+            prefs.edit().putInt("density", dpi).apply();
+        } catch (Exception e) {
+            Log.w("MiniCarHome", "setDensity failed", e);
+            Toast.makeText(this, "Display size needs setup: adb shell pm grant com.kynrek.minicarhome "
+                    + "android.permission.WRITE_SECURE_SETTINGS", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    // ---- Wallpaper behind the panel ----
+    // The picture lives in the app's external files folder so it can also be pushed over ADB:
+    //   adb push picture.jpg /sdcard/Android/data/com.kynrek.minicarhome/files/wallpaper.jpg
+    private static final int PICK_WALLPAPER = 41;
+    private static final int WALLPAPER_SCRIM = 0xA60E1416;   // darkens the picture so text stays readable
+    private Bitmap wallpaperCache;
+    private long wallpaperStamp;
+
+    private File wallpaperFile() {
+        return new File(getExternalFilesDir(null), "wallpaper.jpg");
+    }
+
+    private Drawable panelBackground() {
+        File f = wallpaperFile();
+        if (!f.exists()) return new ColorDrawable(BG);
+        if (wallpaperCache == null || wallpaperStamp != f.lastModified()) {
+            wallpaperCache = BitmapFactory.decodeFile(f.getPath());
+            wallpaperStamp = f.lastModified();
+        }
+        if (wallpaperCache == null) return new ColorDrawable(BG);
+        // Crop the middle of the picture to the panel's shape, so it fills without stretching.
+        int w = panelWidth(), h = getSystemService(WindowManager.class).getMaximumWindowMetrics().getBounds().height();
+        int bw = wallpaperCache.getWidth(), bh = wallpaperCache.getHeight();
+        int cw = bw, ch = bw * h / w;
+        if (ch > bh) { ch = bh; cw = bh * w / h; }
+        Bitmap crop = Bitmap.createBitmap(wallpaperCache, (bw - cw) / 2, (bh - ch) / 2, cw, ch);
+        BitmapDrawable pic = new BitmapDrawable(getResources(), Bitmap.createScaledBitmap(crop, w, h, true));
+        return new LayerDrawable(new Drawable[]{pic, new ColorDrawable(WALLPAPER_SCRIM)});
+    }
+
+    private void pickWallpaper() {
+        Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("image/*");
+        hidePanel();   // the panel floats above every app, so get it out of the picker's way
+        try {
+            startActivityForResult(i, PICK_WALLPAPER);
+        } catch (Exception e) {
+            showPanel();
+            Toast.makeText(this, "No picture picker available", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int request, int result, Intent data) {
+        super.onActivityResult(request, result, data);
+        if (request != PICK_WALLPAPER) return;
+        if (result == RESULT_OK && data != null && data.getData() != null) {
+            try {
+                // Scale big photos down while copying; the panel is only a few hundred pixels wide.
+                BitmapFactory.Options o = new BitmapFactory.Options();
+                o.inJustDecodeBounds = true;
+                try (InputStream in = getContentResolver().openInputStream(data.getData())) { BitmapFactory.decodeStream(in, null, o); }
+                o.inSampleSize = 1;
+                while (Math.max(o.outWidth, o.outHeight) / (o.inSampleSize * 2) >= 1400) o.inSampleSize *= 2;
+                o.inJustDecodeBounds = false;
+                Bitmap b;
+                try (InputStream in = getContentResolver().openInputStream(data.getData())) { b = BitmapFactory.decodeStream(in, null, o); }
+                try (FileOutputStream out = new FileOutputStream(wallpaperFile())) { b.compress(Bitmap.CompressFormat.JPEG, 90, out); }
+            } catch (Exception e) {
+                Toast.makeText(this, "Couldn't use that picture", Toast.LENGTH_SHORT).show();
+            }
+        }
+        rebuildPanel();
+        showPanel();
+    }
+
+    private void removeWallpaper() {
+        wallpaperFile().delete();
+        wallpaperCache = null;
+        rebuildPanel();
     }
 
     private void rebuildPanel() {
@@ -646,6 +744,21 @@ public class HomeActivity extends Activity {
         sides.addView(choice("Left", panelLeft, v -> setPanelLeft(true)));
         sides.addView(choice("Right", !panelLeft, v -> setPanelLeft(false)));
         s.addView(sides, marginTop(ViewGroup.LayoutParams.WRAP_CONTENT, 6));
+        s.addView(text(n >= 3 ? "Display size (other apps)" : "Display size", 14, TEXT), marginTop(ViewGroup.LayoutParams.WRAP_CONTENT, 12));
+        HorizontalScrollView dsScroll = new HorizontalScrollView(this);
+        dsScroll.setHorizontalScrollBarEnabled(false);
+        LinearLayout ds = new LinearLayout(this);
+        ds.setOrientation(LinearLayout.HORIZONTAL);
+        int dpi = getResources().getConfiguration().densityDpi;
+        for (int d : DENSITIES) ds.addView(choice(String.valueOf(d), d == dpi, v -> setDensity(d)));
+        dsScroll.addView(ds);
+        s.addView(dsScroll, marginTop(ViewGroup.LayoutParams.WRAP_CONTENT, 6));
+        s.addView(text("Wallpaper", 14, TEXT), marginTop(ViewGroup.LayoutParams.WRAP_CONTENT, 12));
+        LinearLayout wp = new LinearLayout(this);
+        wp.setOrientation(LinearLayout.HORIZONTAL);
+        wp.addView(choice("Choose", false, v -> pickWallpaper()));
+        wp.addView(choice("None", !wallpaperFile().exists(), v -> removeWallpaper()));
+        s.addView(wp, marginTop(ViewGroup.LayoutParams.WRAP_CONTENT, 6));
         s.addView(text(n >= 3 ? "Main display app" : "Main app", 14, TEXT), marginTop(ViewGroup.LayoutParams.WRAP_CONTENT, 12));
         LinearLayout nav = new LinearLayout(this);
         nav.setOrientation(LinearLayout.HORIZONTAL);
@@ -1501,7 +1614,7 @@ public class HomeActivity extends Activity {
     }
 
     private void style(TextView t, int sp, int color) {
-        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp);
+        t.setTextSize(TypedValue.COMPLEX_UNIT_PX, sp * TEXT_SCALE);
         t.setTextColor(color);
     }
 
@@ -1518,7 +1631,17 @@ public class HomeActivity extends Activity {
         return lp;
     }
 
+    // The panel is laid out for the box's original 120 dpi screen. Sizes stay fixed at that scale, so raising
+    // Android's display size or font size (to enlarge other apps) leaves this layout unchanged.
+    private static final float UI_SCALE = 0.75f;
+    private static final float TEXT_SCALE = UI_SCALE * 1.3f;   // text was tuned with Android's font size at 1.3
+
     private int dp(int v) {
+        return Math.round(v * UI_SCALE);
+    }
+
+    /** Real dp at the current display density, for things Android draws itself (the freeform caption bar). */
+    private int sysDp(int v) {
         return Math.round(v * getResources().getDisplayMetrics().density);
     }
 }
