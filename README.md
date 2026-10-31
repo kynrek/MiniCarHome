@@ -51,7 +51,7 @@ in front, so the panel disappears until you leave Settings.
 - **Now playing**: artwork, title, a progress bar and time remaining, and controls for whatever is
   playing (Podcast Addict, Audible, Spotify, Symfonium…): previous/next track (|◀ ▶|), seek back and
   forward (↺ ↻) and play/pause. Tap the card to open that app.
-- **Shortcuts** to your car apps, scrolling if they don't fit, plus **All apps**.
+- **Shortcuts** to your car apps, scrolling if they don't fit, plus **All apps** and **Options** (settings).
 - **Voice button** (off by default): say "navigate to In-N-Out" (or just "In-N-Out"). The panel shows what it
   heard while the map stays in view, and the route starts in Waze or Google Maps straight away, with no results
   list to tap through. Speech is recognized on the box. Or set it to open Android's assistant or an app you choose
@@ -59,7 +59,7 @@ in front, so the panel disappears until you leave Settings.
 - **Wi-Fi and cell signal** with bars and the network type (optional; off by default, since Android's status bar
   already shows them).
 
-### Settings (gear, bottom left)
+### Settings (Options tile)
 | Setting | Options |
 |---|---|
 | Icons per row | 2–4; sets the panel's width (default 3). The main window grows into any space freed up |
@@ -95,7 +95,8 @@ The panel compacts itself as it narrows: shorter date, a smaller music card, sta
 <sub>Left: 2 icons per row. Right: panel on the left side, with settings open.</sub>
 
 ### App browser
-**All apps** opens a full-screen browser with search, a row of recently used apps and every app A–Z.
+**All apps** opens a browser in the main window, beside the panel, with search, a row of recently used apps
+and every app A–Z. Tap an app and it opens there.
 
 ![All apps](docs/screenshots/browser.png)
 
@@ -151,7 +152,7 @@ adb install minicarhome/apk/minicarhome.apk
 
 # MiniCarHome
 adb shell settings put global enable_freeform_support 1
-adb shell settings put global hidden_api_blacklist_exemptions "Landroid/app/ActivityOptions;->setLaunchWindowingMode,Landroid/view/IWindowManager"
+adb shell settings put global hidden_api_blacklist_exemptions "Landroid/app/ActivityOptions;->setLaunchWindowingMode,Landroid/view/IWindowManager,Landroid/app/IActivityTaskManager,Landroid/app/TaskInfo,Landroid/window/"
 adb shell appops set com.kynrek.minicarhome SYSTEM_ALERT_WINDOW allow
 adb shell cmd notification allow_listener com.kynrek.minicarhome/com.kynrek.minicarhome.MediaListener 0
 adb shell pm grant com.kynrek.minicarhome android.permission.READ_PHONE_STATE
@@ -168,6 +169,21 @@ adb shell settings put secure accessibility_enabled 1
 adb shell pm disable-user --user 0 com.applepie.floatingball   # optional: hide the vendor floating ball
 ```
 
+### Optional: Shizuku
+
+A few apps (Aladdin Connect, for one) open their main screen in a new window that Android won't let another app
+resize. [Shizuku](https://github.com/RikkaApps/Shizuku) runs a small helper with adb-level access that can. Install
+it, start it, and allow MiniCarHome when Shizuku asks:
+
+```sh
+adb install shizuku.apk          # from github.com/RikkaApps/Shizuku/releases
+adb shell "$(adb shell pm path moe.shizuku.privileged.api | cut -d: -f2 | xargs dirname)/lib/arm64/libshizuku.so"
+adb shell pm grant moe.shizuku.privileged.api android.permission.WRITE_SECURE_SETTINGS   # lets it start on boot
+```
+
+Shizuku stops when the box reboots. Start it again from the Shizuku app (Start, via wireless debugging, which
+needs a Wi-Fi network, such as the car's CarPlay Wi-Fi), or pair it once and turn on its start-on-boot option.
+
 Back to the stock home screen:
 `adb shell cmd package set-home-activity com.android.launcher3/.uioverrides.QuickstepLauncher`
 
@@ -182,7 +198,11 @@ starts a wireless CarPlay session; when that link drops, the box's CarPlay servi
 which also turns Wireless debugging off. Tap **Wireless Debug** (Box Tools) to turn it back on.
 
 **An app opens full screen instead of in the main window.** Android won't move a window that's already
-open. Swipe the app away in Recents once and it will open in the main window from then on.
+open. Swipe the app away in Recents once and it will open in the main window from then on. Some apps (Aladdin
+Connect, for one) open their main screen as a new task from a splash screen, which Android sizes to the whole
+screen. MiniCarHome notices the first time. With [Shizuku](#optional-shizuku) running it moves those apps into
+the main window, caption-free like any other app; without it they open full screen. Apps locked to portrait
+(Aladdin Connect is) keep a ▭ ✕ bar: without one, Android squeezes them into a narrow portrait column.
 
 ## Build
 
@@ -219,7 +239,8 @@ This writes `minicarhome/out/minicarhome.apk`, signed with `~/.android/debug.key
 
 ## License
 
-[MIT](LICENSE). Icons are from Google's Material icons (Apache 2.0).
+[MIT](LICENSE). Icons are from Google's Material icons (Apache 2.0). Includes the Shizuku API (MIT), see
+`minicarhome/libs/README.md`.
 
 ## Website
 

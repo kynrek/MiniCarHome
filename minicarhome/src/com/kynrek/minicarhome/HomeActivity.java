@@ -37,6 +37,10 @@ import android.speech.RecognitionListener;
 import android.speech.RecognizerIntent;
 import android.speech.SpeechRecognizer;
 import android.net.Uri;
+import android.os.IBinder;
+import rikka.shizuku.Shizuku;
+import rikka.shizuku.ShizukuBinderWrapper;
+import rikka.shizuku.SystemServiceHelper;
 import android.telephony.SignalStrength;
 import android.telephony.TelephonyManager;
 import android.text.Editable;
@@ -89,9 +93,12 @@ public class HomeActivity extends Activity {
     // The main window is a multi-window task with launch bounds: unlike a freeform window it has no caption
     // bar (▭ ✕). Freeform is only used briefly to close a window that has to be reopened at a new size.
     private static final int WINDOWING_MODE_FREEFORM = 5, WINDOWING_MODE_MULTI_WINDOW = 6;
+    private static final int FREEFORM_CAPTION_DP = 24;   // measured: 24 px at 160 dpi; scales with display size
     private final java.util.Map<String, Rect> openedAt = new java.util.HashMap<>();   // pane apps and their window bounds
     private String reopening;   // app being closed and reopened at a new size; ignore other starts meanwhile
     private String paneTarget;   // the app most recently opened in the pane
+    private long paneLaunchedAt;
+    private static final long PANE_RESCUE_MS = 10000;
     private static final int MAX_MAPS_ATTEMPTS = 30;
     private static final long MAPS_RETRY_MS = 2000;
     private int mapsAttempts;
@@ -163,9 +170,33 @@ public class HomeActivity extends Activity {
         columns = Math.max(MIN_COLUMNS, Math.min(MAX_COLUMNS, prefs.getInt("columns", DEFAULT_COLUMNS)));
         panelLeft = prefs.getBoolean("panel_left", false);
         setContentView(buildBackdrop());
+        Shizuku.addBinderReceivedListenerSticky(shizukuReceived, main);
+        // An app installed, updated (new name or icon) or removed: redraw the shortcuts.
+        android.content.IntentFilter apps = new android.content.IntentFilter();
+        apps.addAction(Intent.ACTION_PACKAGE_ADDED);
+        apps.addAction(Intent.ACTION_PACKAGE_REPLACED);
+        apps.addAction(Intent.ACTION_PACKAGE_REMOVED);
+        apps.addAction(Intent.ACTION_PACKAGE_CHANGED);
+        apps.addDataScheme("package");
+        registerReceiver(appsChanged, apps);
         panel = buildPanel();
         main.postDelayed(this::ensureMaps, 800);
         if (!prefs.contains("density")) setDensity(DEFAULT_DENSITY);   // first run: bigger than the box's 120 dpi
+    }
+
+    private final android.content.BroadcastReceiver appsChanged = new android.content.BroadcastReceiver() {
+        @Override public void onReceive(Context c, Intent i) {
+            main.removeCallbacks(appsRebuild);
+            main.postDelayed(appsRebuild, 500);   // an update sends removed, added and replaced in a row
+        }
+    };
+    private final Runnable appsRebuild = () -> rebuildPanel();
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        unregisterReceiver(appsChanged);
+        Shizuku.removeBinderReceivedListener(shizukuReceived);
     }
 
     @Override
@@ -210,11 +241,166 @@ public class HomeActivity extends Activity {
         hidePanel();
         if (sessions != null) sessions.removeOnActiveSessionsChangedListener(sessionsListener);
         setController(null);
+        rescuePaneApp();
     }
 
-    @Override
-    public void onBackPressed() {
-        hideBrowser();
+    /**
+     * An app just opened in the pane covered the home screen: its splash screen started the main screen in a
+     * new task (Aladdin Connect does this), and a new task opens full screen. Remember the app. With Shizuku,
+     * close that task and open the app again the hand-off way; without it, the app stays full screen.
+     */
+    private void rescuePaneApp() {
+        if (paneTarget == null || SystemClock.uptimeMillis() - paneLaunchedAt > PANE_RESCUE_MS) return;
+        paneLaunchedAt = 0;
+        String pkg = paneTarget;
+        java.util.Set<String> apps = new java.util.HashSet<>(handoffApps());
+        if (!apps.add(pkg)) return;
+        prefs.edit().putStringSet("handoff_apps", apps).apply();
+        Log.i(TAG, pkg + " hands off to a new task");
+        Intent i = pm.getLaunchIntentForPackage(pkg);
+        if (i == null || !shizukuReady()) return;
+        Integer task = findTask(pkg);
+        if (task == null) return;
+        try {
+            Object atm = activityTasks();
+            atm.getClass().getMethod("removeTask", int.class).invoke(atm, task);
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            Log.w(TAG, "removeTask failed", e);
+            return;
+        }
+        main.postDelayed(() -> startHandoffApp(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), pkg), 600);
+    }
+
+    /**
+     * Apps whose splash screen opens the main screen in a new task: started freeform, that task inherits
+     * freeform but not the pane's bounds, so Shizuku resizes it into the pane once it appears (it keeps the
+     * ▭ ✕ caption bar). Without Shizuku they open full screen, which at least shows all of them.
+     */
+    private void startHandoffApp(Intent i, String pkg) {
+        if (!shizukuReady()) {
+            paneLaunchedAt = 0;   // full screen on purpose
+            try { startActivity(i); } catch (RuntimeException e) { Log.w(TAG, "launch failed", e); }
+            return;
+        }
+        startPane(i, WINDOWING_MODE_FREEFORM);
+        Rect bounds = mapsBounds();
+        bounds.bottom -= sysDp(FREEFORM_CAPTION_DP);   // the caption bar pushes the app down by its height
+        for (long delay : new long[]{1500, 3000, 5000}) {   // the main screen's task appears after the splash
+            main.postDelayed(() -> { if (pkg.equals(paneTarget)) fitTask(pkg, bounds); }, delay);
+        }
+    }
+
+    // ---- Shizuku (optional) ----
+    // A helper app with adb-level access. When it's running and has allowed MiniCarHome, MiniCarHome can resize
+    // other apps' windows, which Android otherwise doesn't allow.
+
+    private static final int SHIZUKU_REQUEST = 7;
+
+    private final Shizuku.OnBinderReceivedListener shizukuReceived = () -> {
+        try {
+            if (Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED
+                    && !Shizuku.shouldShowRequestPermissionRationale()) {
+                Shizuku.requestPermission(SHIZUKU_REQUEST);   // asks once, in Shizuku's own dialog
+            }
+        } catch (RuntimeException e) { Log.w(TAG, "Shizuku permission check failed", e); }
+    };
+
+    private boolean shizukuReady() {
+        try {
+            return Shizuku.pingBinder() && Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED;
+        } catch (RuntimeException e) {
+            return false;
+        }
+    }
+
+    /** IActivityTaskManager, called through Shizuku (as the shell user). */
+    private Object activityTasks() throws ReflectiveOperationException {
+        IBinder b = new ShizukuBinderWrapper(SystemServiceHelper.getSystemService("activity_task"));
+        return Class.forName("android.app.IActivityTaskManager$Stub").getMethod("asInterface", IBinder.class).invoke(null, b);
+    }
+
+    /** The id of the app's most recent visible task, or null. */
+    private Integer findTask(String pkg) {
+        android.app.ActivityManager.RunningTaskInfo t = findTaskInfo(pkg);
+        return t == null ? null : t.taskId;
+    }
+
+    private boolean portraitOnly(android.app.ActivityManager.RunningTaskInfo task) {
+        try {
+            int o = pm.getActivityInfo(task.topActivity, 0).screenOrientation;
+            return o == android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                    || o == android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+                    || o == android.content.pm.ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT
+                    || o == android.content.pm.ActivityInfo.SCREEN_ORIENTATION_USER_PORTRAIT;
+        } catch (PackageManager.NameNotFoundException | RuntimeException e) {
+            return false;
+        }
+    }
+
+    private android.app.ActivityManager.RunningTaskInfo findTaskInfo(String pkg) {
+        try {
+            Object atm = activityTasks();
+            for (Method m : atm.getClass().getMethods()) {
+                if (!m.getName().equals("getTasks")) continue;
+                // getTasks(int maxNum, boolean filterOnlyVisibleRecents, boolean keepIntentExtra, int displayId)
+                Class<?>[] types = m.getParameterTypes();
+                Object[] args = new Object[types.length];
+                for (int k = 0; k < types.length; k++) {
+                    args[k] = types[k] == boolean.class ? (Object) false : (Object) (k == 0 ? 20 : 0);
+                }
+                for (Object o : (List<?>) m.invoke(atm, args)) {
+                    android.app.ActivityManager.RunningTaskInfo t = (android.app.ActivityManager.RunningTaskInfo) o;
+                    ComponentName top = t.topActivity != null ? t.topActivity : t.baseActivity;
+                    if (top != null && pkg.equals(top.getPackageName())) return t;
+                }
+                return null;
+            }
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            Log.w(TAG, "getTasks failed", e);
+        }
+        return null;
+    }
+
+    /**
+     * Put the app's task in the pane at its full size with a WindowContainerTransaction: caption-less
+     * multi-window like any other app, except for apps locked to portrait, which multi-window letterboxes into a
+     * narrow column. Those stay freeform, which ignores the lock; Android keeps a freeform window below the
+     * status bar, so they keep their caption bar there. If the transaction is refused, just resize the task.
+     */
+    private void fitTask(String pkg, Rect captioned) {
+        android.app.ActivityManager.RunningTaskInfo task = findTaskInfo(pkg);
+        if (task == null) return;
+        try {
+            Object atm = activityTasks();
+            Object token = android.app.TaskInfo.class.getField("token").get(task);
+            Class<?> tokenClass = Class.forName("android.window.WindowContainerToken");
+            Class<?> wctClass = Class.forName("android.window.WindowContainerTransaction");
+            Object wct = wctClass.getConstructor().newInstance();
+            Rect bounds = captioned;
+            if (!portraitOnly(task)) {
+                wctClass.getMethod("setWindowingMode", tokenClass, int.class).invoke(wct, token, WINDOWING_MODE_MULTI_WINDOW);
+                bounds = mapsBounds();
+            }
+            wctClass.getMethod("setBounds", tokenClass, Rect.class).invoke(wct, token, bounds);
+            Object controller = atm.getClass().getMethod("getWindowOrganizerController").invoke(atm);
+            IBinder b = new ShizukuBinderWrapper((IBinder) controller.getClass().getMethod("asBinder").invoke(controller));
+            Object wo = Class.forName("android.window.IWindowOrganizerController$Stub")
+                    .getMethod("asInterface", IBinder.class).invoke(null, b);
+            wo.getClass().getMethod("applyTransaction", wctClass).invoke(wo, wct);
+            return;
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            Log.w(TAG, "window transaction failed; resizing instead", e);
+        }
+        try {
+            Object atm = activityTasks();
+            atm.getClass().getMethod("resizeTask", int.class, Rect.class, int.class).invoke(atm, task.taskId, captioned, 0);
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            Log.w(TAG, "resizeTask failed", e);
+        }
+    }
+
+    private java.util.Set<String> handoffApps() {
+        return prefs.getStringSet("handoff_apps", java.util.Collections.emptySet());
     }
 
     // ---- Maps window ----
@@ -306,6 +492,8 @@ public class HomeActivity extends Activity {
     private void startInPane(Intent i, String pkg) {
         if (pkg.equals(reopening)) return;   // e.g. the Maps retry firing mid-close
         paneTarget = pkg;
+        paneLaunchedAt = SystemClock.uptimeMillis();
+        if (handoffApps().contains(pkg)) { startHandoffApp(i, pkg); return; }
         Rect want = mapsBounds(), had = openedAt.get(pkg);
         startPane(i, WINDOWING_MODE_FREEFORM);
         if (had == null || had.equals(want)) {
@@ -527,7 +715,9 @@ public class HomeActivity extends Activity {
     private void openBrowser(int pick) {
         if (browserShown || !Settings.canDrawOverlays(this)) return;
         browser = new BrowserView(this, pick);
-        wm.addView(browser, overlayParams(WindowManager.LayoutParams.MATCH_PARENT, Gravity.TOP | Gravity.START, true));
+        // In the main pane, beside the panel, like an app opened there.
+        int width = wm.getMaximumWindowMetrics().getBounds().width() - panelWidth();
+        wm.addView(browser, overlayParams(width, Gravity.TOP | (panelLeft ? Gravity.END : Gravity.START), true));
         browserShown = true;
     }
 
@@ -652,24 +842,10 @@ public class HomeActivity extends Activity {
         ScrollView scroller = new ScrollView(this);
         scroller.setVerticalScrollBarEnabled(false);
         scroller.addView(settingsOpen ? buildSettings(n) : buildShortcuts(n));
+        p.addView(scroller, weighted(4));
+        // The bottom bar holds only the voice button and bottom signal bars; settings open from the Options tile.
         if (prefs.getBoolean("show_mic", false) || "bottom".equals(signalPlace())) {
-            p.addView(scroller, weighted(4));
             p.addView(buildBottomBar(n), new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        } else {
-            // Only the gear is left for the bottom bar: float it in the corner and let the shortcuts run to
-            // the bottom edge, scrolling clear of the gear at the end.
-            FrameLayout area = new FrameLayout(this);
-            scroller.setClipToPadding(false);
-            scroller.setPadding(0, 0, 0, dp(44));
-            area.addView(scroller, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-            View gear = settingsGear();
-            GradientDrawable dot = rounded(0xB31B2428, 0);
-            dot.setShape(GradientDrawable.OVAL);
-            gear.setBackground(dot);
-            FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(dp(36), dp(36), Gravity.BOTTOM | Gravity.START);
-            lp.bottomMargin = dp(6);
-            area.addView(gear, lp);
-            p.addView(area, weighted(4));
         }
         return p;
     }
@@ -825,7 +1001,13 @@ public class HomeActivity extends Activity {
         s.setOrientation(LinearLayout.VERTICAL);
         s.setBackground(rounded(CARD, 16));
         s.setPadding(dp(10), dp(10), dp(10), dp(10));
-        s.addView(text(n >= 2 ? "Icons per row" : "Icons", 14, TEXT));
+        LinearLayout top = new LinearLayout(this);
+        top.setOrientation(LinearLayout.HORIZONTAL);
+        top.setGravity(Gravity.CENTER_VERTICAL);
+        top.addView(text("Options", 16, ACCENT), new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        top.addView(choice("Done", true, v -> { settingsOpen = false; rebuildPanel(); }));
+        s.addView(top);
+        s.addView(text(n >= 2 ? "Icons per row" : "Icons", 14, TEXT), marginTop(ViewGroup.LayoutParams.WRAP_CONTENT, 10));
         LinearLayout stepper = new LinearLayout(this);
         stepper.setOrientation(LinearLayout.HORIZONTAL);
         stepper.setGravity(Gravity.CENTER_VERTICAL);
@@ -992,6 +1174,7 @@ public class HomeActivity extends Activity {
             tiles.add(iconTile("✓", "Done", v -> { editing = false; rebuildPanel(); }));
         } else {
             tiles.add(iconTile("☷", "All apps", v -> showBrowser()));
+            tiles.add(optionsTile());
         }
         return rows(tiles, n);
     }
@@ -1021,7 +1204,7 @@ public class HomeActivity extends Activity {
     }
 
     /**
-     * Bottom bar: settings gear on the left; the assistant button and (when placed at the bottom) the
+     * Bottom bar (only when needed): the voice button and (when placed at the bottom) the
      * Wi-Fi and cell indicators on the right. One row when it fits, stacked otherwise.
      * Kept clear of the bottom-edge Home gesture strip.
      */
@@ -1029,15 +1212,12 @@ public class HomeActivity extends Activity {
         boolean mic = prefs.getBoolean("show_mic", false);
         boolean signals = "bottom".equals(signalPlace());
         boolean oneRow = n >= 4 || (n == 3 && !mic);
-        View gear = settingsGear();
-
         LinearLayout box = new LinearLayout(this);
         box.setPadding(0, dp(2), dp(4), dp(6));
         LinearLayout buttons = new LinearLayout(this);
         buttons.setOrientation(LinearLayout.HORIZONTAL);
         buttons.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
-        buttons.addView(gear, new LinearLayout.LayoutParams(dp(36), dp(36)));
-        voiceStatus = text("", 13, TEXT);   // what built-in voice heard, between the gear and the mic
+        voiceStatus = text("", 13, TEXT);   // what built-in voice heard, left of the mic
         voiceStatus.setSingleLine(true);
         voiceStatus.setEllipsize(TextUtils.TruncateAt.START);
         voiceStatus.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
@@ -1064,16 +1244,6 @@ public class HomeActivity extends Activity {
             }
         }
         return box;
-    }
-
-    private View settingsGear() {
-        ImageView gear = new ImageView(this);
-        gear.setImageResource(getResources().getIdentifier("ic_settings", "drawable", getPackageName()));
-        gear.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        gear.setPadding(dp(6), dp(6), dp(6), dp(6));
-        gear.setContentDescription("MiniCarHome settings");
-        gear.setOnClickListener(v -> { settingsOpen = !settingsOpen; editing = false; rebuildPanel(); });
-        return gear;
     }
 
     private String signalPlace() { return prefs.getString("signals", "off"); }   // Android's status bar already shows them
@@ -1620,6 +1790,7 @@ public class HomeActivity extends Activity {
 
     private void launch(ComponentName cn) {
         hideBrowser();
+        paneLaunchedAt = 0;   // a full-screen launch (Box Tools' icons) is meant to cover the home screen
         if (cn == null) return;
         remember(cn);
         if (navApp().equals(cn.getPackageName())) { launchMaps(); return; }
@@ -1815,6 +1986,22 @@ public class HomeActivity extends Activity {
         return t;
     }
 
+    /** Opens MiniCarHome's settings; sits beside All apps so nothing covers the shortcuts. */
+    private View optionsTile() {
+        ImageView gear = new ImageView(this);
+        gear.setImageResource(getResources().getIdentifier("ic_settings", "drawable", getPackageName()));
+        gear.setImageTintList(ColorStateList.valueOf(ACCENT));
+        gear.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        gear.setBackground(rounded(CARD, 12));
+        gear.setPadding(dp(11), dp(11), dp(11), dp(11));
+        LinearLayout t = column();
+        t.addView(gear, new LinearLayout.LayoutParams(dp(48), dp(48)));
+        t.addView(label("Options"));
+        t.setContentDescription("MiniCarHome settings");
+        t.setOnClickListener(v -> { settingsOpen = true; editing = false; rebuildPanel(); });
+        return t;
+    }
+
     private View tile(Drawable icon, String name, View.OnClickListener click) {
         LinearLayout t = column();
         ImageView iv = new ImageView(this);
@@ -1900,5 +2087,10 @@ public class HomeActivity extends Activity {
 
     private int dp(int v) {
         return Math.round(v * UI_SCALE);
+    }
+
+    /** Real dp at the current display density, for things Android draws itself (the freeform caption bar). */
+    private int sysDp(int v) {
+        return Math.round(v * getResources().getDisplayMetrics().density);
     }
 }

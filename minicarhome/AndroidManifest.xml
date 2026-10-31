@@ -32,6 +32,9 @@
          pm grant com.kynrek.minicarhome android.permission.RECORD_AUDIO -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
+    <!-- Shizuku (optional): resizes apps whose main screen opens in a new window so they fit the main pane. -->
+    <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
+
     <queries>
         <intent>
             <action android:name="android.intent.action.MAIN" />
@@ -43,6 +46,14 @@
     </queries>
 
     <application android:label="MiniCarHome" android:icon="@drawable/ic_launcher" android:allowBackup="false">
+        <meta-data android:name="moe.shizuku.client.V3_SUPPORT" android:value="true" />
+        <provider
+            android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="com.kynrek.minicarhome.shizuku"
+            android:multiprocess="false"
+            android:enabled="true"
+            android:exported="true"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
 
         <activity android:name=".HomeActivity"
             android:label="MiniCarHome"
