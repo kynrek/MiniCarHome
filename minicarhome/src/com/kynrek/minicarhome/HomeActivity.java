@@ -99,10 +99,10 @@ public class HomeActivity extends Activity {
     private String paneTarget;   // the app most recently opened in the pane
     private long paneLaunchedAt;
     private static final long PANE_RESCUE_MS = 10000;
-    private static final int MAX_MAPS_ATTEMPTS = 30;
+    private static final int MAX_MAPS_ATTEMPTS = 90;   // 3 minutes: right after boot the box is slow to start apps
     private static final long MAPS_RETRY_MS = 2000;
     private int mapsAttempts;
-    private boolean mapsPending, topResumed, editing;
+    private boolean mapsPending, mapsInterrupted, topResumed, editing;
     private String paneApp;   // app opened in the main pane over the main display app, if any
     /**
      * Launcher icons that only bounce to another screen and close themselves; in a freeform window the
@@ -235,6 +235,10 @@ public class HomeActivity extends Activity {
     protected void onStart() {
         super.onStart();
         showPanel();
+        if (mapsInterrupted) {
+            mapsInterrupted = false;
+            ensureMaps();
+        }
         main.removeCallbacks(signalTick);
         main.post(signalTick);
         showWeather();
@@ -253,7 +257,9 @@ public class HomeActivity extends Activity {
     @Override
     protected void onStop() {
         super.onStop();
-        // Another app is now full screen: stop reopening Maps over it and take the overlays down.
+        // Another app is now full screen: stop reopening Maps over it and take the overlays down. If Maps
+        // hadn't come up yet (something covered the home screen during boot), carry on when we're back.
+        mapsInterrupted = mapsPending;
         mapsPending = false;
         main.removeCallbacks(mapsRetry);
         main.removeCallbacks(signalTick);
@@ -515,11 +521,13 @@ public class HomeActivity extends Activity {
     /**
      * Open the Maps window and keep retrying until it actually comes up: right after boot Maps can be
      * unavailable or the start can be dropped, which left an empty slot until it was tapped.
-     * Success shows up as this activity losing top-resumed status to Maps.
+     * With Shizuku, success is Maps' task showing; without it, this activity losing top-resumed status, which
+     * anything else opening over the home screen also causes.
      */
     private void ensureMaps() {
         mapsAttempts = 0;
         mapsPending = true;
+        paneTarget = navApp();   // opening another app in the pane changes this and ends the retries
         main.removeCallbacks(mapsRetry);
         main.post(mapsRetry);
     }
@@ -527,8 +535,11 @@ public class HomeActivity extends Activity {
     private final Runnable mapsRetry = new Runnable() {
         @Override public void run() {
             if (!mapsPending) return;
-            if (mapsAttempts > 0 && !topResumed) {
-                // Something (Maps) is above us: either our last try worked or Maps was already open.
+            if (paneTarget != null && !paneTarget.equals(navApp())) {
+                mapsPending = false;   // another app was opened in the pane meanwhile
+                return;
+            }
+            if (mapsAttempts > 0 && mapsUp()) {
                 Log.i(TAG, "Maps window is up after " + mapsAttempts + " tries");
                 mapsPending = false;
                 return;
@@ -547,12 +558,14 @@ public class HomeActivity extends Activity {
     @Override
     public void onTopResumedActivityChanged(boolean top) {
         super.onTopResumedActivityChanged(top);
-        topResumed = top;
-        if (!top && mapsPending) {
-            Log.i(TAG, "Maps window is up after " + mapsAttempts + " tries");
-            mapsPending = false;
-            main.removeCallbacks(mapsRetry);
-        }
+        topResumed = top;   // the next Maps retry checks whether Maps is up
+    }
+
+    /** Whether the main display app's window is showing. */
+    private boolean mapsUp() {
+        if (!shizukuReady()) return !topResumed;   // something is above us: most likely Maps
+        android.app.ActivityManager.RunningTaskInfo t = findTaskInfo(navApp());
+        return t != null && t.isVisible();
     }
 
     /** Back to the home screen: close the app in the main window (if any) and show the main display app. */
