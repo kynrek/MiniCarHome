@@ -140,7 +140,7 @@ public class HomeActivity extends Activity {
     private PackageManager pm;
     private WindowManager wm;
     private SharedPreferences prefs;
-    private View panel;
+    private FrameLayout panel;
     private BrowserView browser;
     private boolean panelShown, browserShown;
     private TextView mediaTitle, mediaArtist, playButton, wifiLabel, cellLabel;
@@ -154,9 +154,13 @@ public class HomeActivity extends Activity {
     private TextView mediaRemaining;
     private MediaSessionManager sessions;
     private MediaController controller;
+    // The shown app's track and playback state, kept from its callbacks: each getMetadata() is a call
+    // into the app that copies the album art across, too costly for the progress bar's every second.
+    private MediaMetadata metadata;
+    private PlaybackState playback;
     private final MediaController.Callback mediaCallback = new MediaController.Callback() {
-        @Override public void onMetadataChanged(MediaMetadata m) { showMedia(); }
-        @Override public void onPlaybackStateChanged(PlaybackState s) { showMedia(); }
+        @Override public void onMetadataChanged(MediaMetadata m) { metadata = m; showMedia(); }
+        @Override public void onPlaybackStateChanged(PlaybackState s) { playback = s; showMedia(); }
         @Override public void onSessionDestroyed() { pickController(); }
     };
     // Every active session is watched, so the card switches to whichever app starts playing
@@ -187,13 +191,16 @@ public class HomeActivity extends Activity {
         apps.addAction(Intent.ACTION_PACKAGE_CHANGED);
         apps.addDataScheme("package");
         registerReceiver(appsChanged, apps);
-        panel = buildPanel();
+        panel = new FrameLayout(this);   // one overlay window for the panel's life; rebuilds swap what's inside
+        panel.addView(buildPanel());
         main.postDelayed(this::ensureMaps, 800);
         if (!prefs.contains("density")) setDensity(DEFAULT_DENSITY);   // first run: bigger than the box's 120 dpi
     }
 
     private final android.content.BroadcastReceiver appsChanged = new android.content.BroadcastReceiver() {
         @Override public void onReceive(Context c, Intent i) {
+            iconCache.clear();
+            labelCache.clear();
             main.removeCallbacks(appsRebuild);
             main.postDelayed(appsRebuild, 500);   // an update sends removed, added and replaced in a row
         }
@@ -457,7 +464,7 @@ public class HomeActivity extends Activity {
 
     /** Whether the app's top screen is letterboxed, from "dumpsys activity activities" run through Shizuku. */
     private boolean letterboxed(String pkg) {
-        String out = shell("dumpsys", "activity", "activities");
+        String out = shell("dumpsys", "activity", "-p", pkg, "activities");
         java.util.regex.Matcher m = java.util.regex.Pattern
                 .compile("\\* Hist +#\\d+: ActivityRecord\\{\\S+ u0 " + java.util.regex.Pattern.quote(pkg) + "/").matcher(out);
         int at = m.find() ? m.start() + 1 : -1;   // its task's top activity comes first
@@ -668,8 +675,12 @@ public class HomeActivity extends Activity {
             Toast.makeText(this, "MiniCarHome needs the 'display over other apps' permission", Toast.LENGTH_LONG).show();
             return;
         }
-        wm.addView(panel, overlayParams(panelWidth(), Gravity.TOP | (panelLeft ? Gravity.START : Gravity.END), false));
+        wm.addView(panel, panelParams());
         panelShown = true;
+    }
+
+    private WindowManager.LayoutParams panelParams() {
+        return overlayParams(panelWidth(), Gravity.TOP | (panelLeft ? Gravity.START : Gravity.END), false);
     }
 
     /** Panel width for the chosen icons per row, never more than 60% of the screen. */
@@ -975,8 +986,8 @@ public class HomeActivity extends Activity {
     //   adb push picture.jpg /sdcard/Android/data/com.kynrek.minicarhome/files/wallpaper.jpg
     private static final int PICK_WALLPAPER = 41;
     private static final int WALLPAPER_SCRIM = 0x660E1416;   // darkens the picture a little so text stays readable
-    private Bitmap wallpaperCache;
-    private long wallpaperStamp;
+    private Bitmap wallpaperCache;   // already cropped and scaled to the panel; rebuilds reuse it
+    private String wallpaperKey;
 
     private File wallpaperFile() {
         return new File(getExternalFilesDir(null), "wallpaper.jpg");
@@ -985,18 +996,20 @@ public class HomeActivity extends Activity {
     private Drawable panelBackground() {
         File f = wallpaperFile();
         if (!f.exists()) return new ColorDrawable(BG);
-        if (wallpaperCache == null || wallpaperStamp != f.lastModified()) {
-            wallpaperCache = BitmapFactory.decodeFile(f.getPath());
-            wallpaperStamp = f.lastModified();
+        int w = panelWidth(), h = wm.getMaximumWindowMetrics().getBounds().height();
+        String key = f.lastModified() + ":" + w + "x" + h;
+        if (wallpaperCache == null || !key.equals(wallpaperKey)) {
+            Bitmap full = BitmapFactory.decodeFile(f.getPath());
+            if (full == null) return new ColorDrawable(BG);
+            // Crop the middle of the picture to the panel's shape, so it fills without stretching.
+            int bw = full.getWidth(), bh = full.getHeight();
+            int cw = bw, ch = bw * h / w;
+            if (ch > bh) { ch = bh; cw = bh * w / h; }
+            Bitmap crop = Bitmap.createBitmap(full, (bw - cw) / 2, (bh - ch) / 2, cw, ch);
+            wallpaperCache = Bitmap.createScaledBitmap(crop, w, h, true);
+            wallpaperKey = key;
         }
-        if (wallpaperCache == null) return new ColorDrawable(BG);
-        // Crop the middle of the picture to the panel's shape, so it fills without stretching.
-        int w = panelWidth(), h = getSystemService(WindowManager.class).getMaximumWindowMetrics().getBounds().height();
-        int bw = wallpaperCache.getWidth(), bh = wallpaperCache.getHeight();
-        int cw = bw, ch = bw * h / w;
-        if (ch > bh) { ch = bh; cw = bh * w / h; }
-        Bitmap crop = Bitmap.createBitmap(wallpaperCache, (bw - cw) / 2, (bh - ch) / 2, cw, ch);
-        BitmapDrawable pic = new BitmapDrawable(getResources(), Bitmap.createScaledBitmap(crop, w, h, true));
+        BitmapDrawable pic = new BitmapDrawable(getResources(), wallpaperCache);
         return new LayerDrawable(new Drawable[]{pic, new ColorDrawable(WALLPAPER_SCRIM)});
     }
 
@@ -1042,12 +1055,13 @@ public class HomeActivity extends Activity {
     }
 
     private void rebuildPanel() {
-        boolean shown = panelShown;
-        hidePanel();
-        panel = buildPanel();
-        if (shown) showPanel();
+        panel.removeAllViews();
+        panel.addView(buildPanel());
+        if (panelShown) wm.updateViewLayout(panel, panelParams());   // the width or side may have changed
         showMedia();
-        updateSignals();
+        main.removeCallbacks(signalTick);
+        if (panelShown) main.post(signalTick);
+        else updateSignals();
         showWeather();
     }
 
@@ -1546,7 +1560,7 @@ public class HomeActivity extends Activity {
     private final Runnable signalTick = new Runnable() {
         @Override public void run() {
             updateSignals();
-            main.postDelayed(this, SIGNAL_REFRESH_MS);
+            if (wifiBars != null) main.postDelayed(this, SIGNAL_REFRESH_MS);   // only while the indicators are shown
         }
     };
 
@@ -1734,8 +1748,8 @@ public class HomeActivity extends Activity {
         private final EditText search;
         private final LinearLayout recentRow;
         private final View recentSection;
-        private final List<ResolveInfo> all = new ArrayList<>();
-        private final List<ResolveInfo> shown = new ArrayList<>();
+        private final List<App> all = new ArrayList<>();
+        private final List<App> shown = new ArrayList<>();
         private final BaseAdapter adapter;
 
         private final int pick;
@@ -1745,6 +1759,8 @@ public class HomeActivity extends Activity {
             this.pick = pick;
             setBackgroundColor(BG);
             setFocusableInTouchMode(true);
+            // Focusable for the search box, but without Android's focus highlight, which greyed out the whole browser.
+            setDefaultFocusHighlightEnabled(false);
             LinearLayout box = new LinearLayout(c);
             box.setOrientation(LinearLayout.VERTICAL);
             box.setPadding(dp(20), dp(12), dp(20), dp(12));
@@ -1784,9 +1800,16 @@ public class HomeActivity extends Activity {
 
             Intent q = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER);
             for (ResolveInfo r : pm.queryIntentActivities(q, 0)) {
-                if (!r.activityInfo.packageName.equals(getPackageName())) all.add(r);
+                if (r.activityInfo.packageName.equals(getPackageName())) continue;
+                ComponentName cn = component(r);
+                String label = labelCache.get(cn.flattenToString());
+                if (label == null) {
+                    label = r.loadLabel(pm).toString();
+                    labelCache.put(cn.flattenToString(), label);
+                }
+                all.add(new App(cn, label));
             }
-            Collections.sort(all, (a, b) -> a.loadLabel(pm).toString().compareToIgnoreCase(b.loadLabel(pm).toString()));
+            Collections.sort(all, (a, b) -> a.label.compareToIgnoreCase(b.label));
             shown.addAll(all);
 
             GridView grid = new GridView(c);
@@ -1798,8 +1821,13 @@ public class HomeActivity extends Activity {
                 @Override public Object getItem(int i) { return shown.get(i); }
                 @Override public long getItemId(int i) { return i; }
                 @Override public View getView(int i, View convert, ViewGroup parent) {
-                    ResolveInfo r = shown.get(i);
-                    return tile(r.loadIcon(pm), r.loadLabel(pm).toString(), v -> choose(component(r)));
+                    App a = shown.get(i);
+                    Drawable icon;
+                    try { icon = activityIcon(a.cn); }
+                    catch (PackageManager.NameNotFoundException e) { icon = pm.getDefaultActivityIcon(); }
+                    View t = convert != null ? convert : tile(null, "", null);
+                    bindTile(t, icon, a.label, v -> choose(a.cn));
+                    return t;
                 }
             };
             grid.setAdapter(adapter);
@@ -1816,8 +1844,8 @@ public class HomeActivity extends Activity {
         private void filter(String q) {
             String needle = q.trim().toLowerCase(Locale.ROOT);
             shown.clear();
-            for (ResolveInfo r : all) {
-                if (needle.isEmpty() || r.loadLabel(pm).toString().toLowerCase(Locale.ROOT).contains(needle)) shown.add(r);
+            for (App a : all) {
+                if (needle.isEmpty() || a.lower.contains(needle)) shown.add(a);
             }
             recentSection.setVisibility(needle.isEmpty() ? View.VISIBLE : View.GONE);
             adapter.notifyDataSetChanged();
@@ -1829,9 +1857,7 @@ public class HomeActivity extends Activity {
                 ComponentName cn = ComponentName.unflattenFromString(flat);
                 if (cn == null) continue;
                 try {
-                    Drawable icon = pm.getActivityIcon(cn);
-                    CharSequence label = pm.getActivityInfo(cn, 0).loadLabel(pm);
-                    recentRow.addView(tile(icon, label.toString(), v -> choose(cn)), new LinearLayout.LayoutParams(dp(96), ViewGroup.LayoutParams.WRAP_CONTENT));
+                    recentRow.addView(tile(activityIcon(cn), activityLabel(cn), v -> choose(cn)), new LinearLayout.LayoutParams(dp(96), ViewGroup.LayoutParams.WRAP_CONTENT));
                 } catch (PackageManager.NameNotFoundException ignored) { }
             }
             recentSection.setVisibility(recentRow.getChildCount() == 0 ? View.GONE : View.VISIBLE);
@@ -1865,6 +1891,18 @@ public class HomeActivity extends Activity {
                 return true;
             }
             return super.dispatchKeyEvent(e);
+        }
+    }
+
+    /** An app in the browser, with its name looked up once. */
+    private static final class App {
+        final ComponentName cn;
+        final String label, lower;
+
+        App(ComponentName cn, String label) {
+            this.cn = cn;
+            this.label = label;
+            this.lower = label.toLowerCase(Locale.ROOT);
         }
     }
 
@@ -1956,6 +1994,8 @@ public class HomeActivity extends Activity {
         }
         if (controller != null) controller.unregisterCallback(mediaCallback);
         controller = c;
+        metadata = c == null ? null : c.getMetadata();
+        playback = c == null ? null : c.getPlaybackState();
         if (controller != null) controller.registerCallback(mediaCallback, main);
         showMedia();
     }
@@ -1969,7 +2009,7 @@ public class HomeActivity extends Activity {
             playButton.setText("▶");
             return;
         }
-        MediaMetadata m = controller.getMetadata();
+        MediaMetadata m = metadata;
         String title = m == null ? null : m.getString(MediaMetadata.METADATA_KEY_TITLE);
         String artist = m == null ? null : m.getString(MediaMetadata.METADATA_KEY_ARTIST);
         if (artist == null && m != null) artist = m.getString(MediaMetadata.METADATA_KEY_ALBUM);
@@ -1982,14 +2022,34 @@ public class HomeActivity extends Activity {
             if (art == null) art = m.getBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON);
         }
         if (art != null) {
-            mediaArt.setImageBitmap(art);
+            Bitmap fit = fitArt(art, m);
+            Drawable now = mediaArt.getDrawable();
+            if (!(now instanceof BitmapDrawable && ((BitmapDrawable) now).getBitmap() == fit)) mediaArt.setImageBitmap(fit);
         } else {
-            try { mediaArt.setImageDrawable(pm.getApplicationIcon(controller.getPackageName())); }
+            try { mediaArt.setImageDrawable(appIcon(controller.getPackageName())); }
             catch (PackageManager.NameNotFoundException e) { mediaArt.setImageDrawable(null); }
         }
-        PlaybackState s = controller.getPlaybackState();
+        PlaybackState s = playback;
         playButton.setText(s != null && s.getState() == PlaybackState.STATE_PLAYING ? "❚❚" : "▶");
         showProgress();
+    }
+
+    private Bitmap artFit;   // album art scaled to the card, made once per track
+    private String artKey;
+
+    /** Players send art up to 1000+ pixels square; the card shows it at 56 dp at most. */
+    private Bitmap fitArt(Bitmap art, MediaMetadata m) {
+        String key = m.getString(MediaMetadata.METADATA_KEY_MEDIA_ID) + "|" + m.getString(MediaMetadata.METADATA_KEY_TITLE)
+                + "|" + m.getString(MediaMetadata.METADATA_KEY_ALBUM) + "|" + art.getWidth() + "x" + art.getHeight();
+        if (!key.equals(artKey)) {
+            int max = dp(56);
+            float scale = Math.min(1f, (float) max / Math.max(art.getWidth(), art.getHeight()));
+            artFit = scale < 1f
+                    ? Bitmap.createScaledBitmap(art, Math.round(art.getWidth() * scale), Math.round(art.getHeight() * scale), true)
+                    : art;
+            artKey = key;
+        }
+        return artFit;
     }
 
     private int seekSeconds() { return prefs.getInt("seek_seconds", 15); }
@@ -2026,8 +2086,8 @@ public class HomeActivity extends Activity {
     private void showProgress() {
         main.removeCallbacks(progressTick);
         if (progressRow == null) return;
-        MediaMetadata m = controller == null ? null : controller.getMetadata();
-        PlaybackState s = controller == null ? null : controller.getPlaybackState();
+        MediaMetadata m = controller == null ? null : metadata;
+        PlaybackState s = controller == null ? null : playback;
         long duration = m == null ? 0 : m.getLong(MediaMetadata.METADATA_KEY_DURATION);
         if (duration <= 0 || s == null || s.getPosition() < 0) {
             progressRow.setVisibility(View.GONE);
@@ -2054,17 +2114,57 @@ public class HomeActivity extends Activity {
     }
 
     private String appName(String pkg) {
-        try { return pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString(); }
+        try { return appLabel(pkg); }
         catch (PackageManager.NameNotFoundException e) { return pkg; }
+    }
+
+    // ---- app icons and names ----
+    // Loaded once and kept until an app is installed, updated or removed (see appsChanged): every
+    // panel rebuild and app-browser scroll would otherwise go back to the package manager.
+    private final java.util.Map<String, Drawable.ConstantState> iconCache = new java.util.HashMap<>();
+    private final java.util.Map<String, String> labelCache = new java.util.HashMap<>();
+
+    private Drawable appIcon(String pkg) throws PackageManager.NameNotFoundException {
+        Drawable.ConstantState cs = iconCache.get(pkg);
+        if (cs != null) return cs.newDrawable();
+        Drawable d = pm.getApplicationIcon(pkg);
+        if (d.getConstantState() != null) iconCache.put(pkg, d.getConstantState());
+        return d;
+    }
+
+    private Drawable activityIcon(ComponentName cn) throws PackageManager.NameNotFoundException {
+        String key = cn.flattenToString();
+        Drawable.ConstantState cs = iconCache.get(key);
+        if (cs != null) return cs.newDrawable();
+        Drawable d = pm.getActivityIcon(cn);
+        if (d.getConstantState() != null) iconCache.put(key, d.getConstantState());
+        return d;
+    }
+
+    private String appLabel(String pkg) throws PackageManager.NameNotFoundException {
+        String label = labelCache.get(pkg);
+        if (label == null) {
+            label = pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString();
+            labelCache.put(pkg, label);
+        }
+        return label;
+    }
+
+    private String activityLabel(ComponentName cn) throws PackageManager.NameNotFoundException {
+        String key = cn.flattenToString();
+        String label = labelCache.get(key);
+        if (label == null) {
+            label = pm.getActivityInfo(cn, 0).loadLabel(pm).toString();
+            labelCache.put(key, label);
+        }
+        return label;
     }
 
     // ---- small view helpers ----
 
     private View appTile(String pkg) {
         try {
-            Drawable icon = pm.getApplicationIcon(pkg);
-            String label = pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString();
-            return tile(icon, label, v -> open(pkg));
+            return tile(appIcon(pkg), appLabel(pkg), v -> open(pkg));
         } catch (PackageManager.NameNotFoundException e) {
             return new View(this);
         }
@@ -2072,9 +2172,7 @@ public class HomeActivity extends Activity {
 
     private View activityTile(ComponentName cn) {
         try {
-            Drawable icon = pm.getActivityIcon(cn);
-            String label = pm.getActivityInfo(cn, 0).loadLabel(pm).toString();
-            return tile(icon, label, v -> launch(cn));
+            return tile(activityIcon(cn), activityLabel(cn), v -> launch(cn));
         } catch (PackageManager.NameNotFoundException | NullPointerException e) {
             return null;
         }
@@ -2109,12 +2207,18 @@ public class HomeActivity extends Activity {
 
     private View tile(Drawable icon, String name, View.OnClickListener click) {
         LinearLayout t = column();
-        ImageView iv = new ImageView(this);
-        iv.setImageDrawable(icon);
-        t.addView(iv, new LinearLayout.LayoutParams(dp(48), dp(48)));
+        t.addView(new ImageView(this), new LinearLayout.LayoutParams(dp(48), dp(48)));
         t.addView(label(name));
-        t.setOnClickListener(click);
+        bindTile(t, icon, name, click);
         return t;
+    }
+
+    /** Fill in a tile made by tile(); the app browser reuses tiles as it scrolls. */
+    private void bindTile(View tile, Drawable icon, String name, View.OnClickListener click) {
+        LinearLayout t = (LinearLayout) tile;
+        ((ImageView) t.getChildAt(0)).setImageDrawable(icon);
+        ((TextView) t.getChildAt(1)).setText(name);
+        t.setOnClickListener(click);
     }
 
     private TextView sectionLabel(String s) {
