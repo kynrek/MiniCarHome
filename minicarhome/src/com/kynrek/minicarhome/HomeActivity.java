@@ -159,6 +159,14 @@ public class HomeActivity extends Activity {
         @Override public void onPlaybackStateChanged(PlaybackState s) { showMedia(); }
         @Override public void onSessionDestroyed() { pickController(); }
     };
+    // Every active session is watched, so the card switches to whichever app starts playing
+    // even when the set of sessions hasn't changed (a player whose session stays open).
+    private final List<MediaController> watched = new ArrayList<>();
+    private final MediaController.Callback watcher = new MediaController.Callback() {
+        @Override public void onPlaybackStateChanged(PlaybackState s) {
+            if (s != null && s.getState() == PlaybackState.STATE_PLAYING) pickController();
+        }
+    };
     private final MediaSessionManager.OnActiveSessionsChangedListener sessionsListener = list -> pickController();
 
     @Override
@@ -248,6 +256,7 @@ public class HomeActivity extends Activity {
         hideBrowser();
         hidePanel();
         if (sessions != null) sessions.removeOnActiveSessionsChangedListener(sessionsListener);
+        watch(Collections.emptyList());
         setController(null);
         rescuePaneApp();
     }
@@ -1922,16 +1931,29 @@ public class HomeActivity extends Activity {
         } catch (SecurityException e) {
             return;
         }
-        MediaController best = null;
+        watch(list);
+        // The app that's playing; otherwise stay on the one shown (the last one played), then the most recent.
+        MediaController best = null, current = null;
         for (MediaController c : list) {
             PlaybackState s = c.getPlaybackState();
             if (s != null && s.getState() == PlaybackState.STATE_PLAYING) { best = c; break; }
-            if (best == null) best = c;
+            if (controller != null && c.getSessionToken().equals(controller.getSessionToken())) current = c;
         }
+        if (best == null) best = current != null ? current : list.isEmpty() ? null : list.get(0);
         setController(best);
     }
 
+    private void watch(List<MediaController> list) {
+        for (MediaController c : watched) c.unregisterCallback(watcher);
+        watched.clear();
+        for (MediaController c : list) { c.registerCallback(watcher, main); watched.add(c); }
+    }
+
     private void setController(MediaController c) {
+        if (c != null && controller != null && c.getSessionToken().equals(controller.getSessionToken())) {
+            showMedia();
+            return;
+        }
         if (controller != null) controller.unregisterCallback(mediaCallback);
         controller = c;
         if (controller != null) controller.registerCallback(mediaCallback, main);
