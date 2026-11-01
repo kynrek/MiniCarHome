@@ -99,9 +99,13 @@ public class HomeActivity extends Activity {
     private String paneTarget;   // the app most recently opened in the pane
     private long paneLaunchedAt;
     private static final long PANE_RESCUE_MS = 10000;
-    private static final int MAX_MAPS_ATTEMPTS = 90;   // 3 minutes: right after boot the box is slow to start apps
-    private static final long MAPS_RETRY_MS = 2000;
+    // Right after boot the box is swamped, and Waze started then came up with no map or GPS until restarted.
+    private static final long BOOT_SETTLE_MS = 90000;   // since boot
+    private static final long MAPS_CHECK_MS = 2000;
+    private static final long MAPS_RELAUNCH_MS = 10000;   // give a slow start this long before opening it again
+    private static final int MAX_MAPS_ATTEMPTS = 18;   // 3 minutes
     private int mapsAttempts;
+    private long mapsLaunchedAt;
     private boolean mapsPending, mapsInterrupted, topResumed, editing;
     private String paneApp;   // app opened in the main pane over the main display app, if any
     /**
@@ -520,7 +524,8 @@ public class HomeActivity extends Activity {
 
     /**
      * Open the Maps window and keep retrying until it actually comes up: right after boot Maps can be
-     * unavailable or the start can be dropped, which left an empty slot until it was tapped.
+     * unavailable or the start can be dropped, which left an empty slot until it was tapped. Right after boot,
+     * wait for the box to settle first.
      * With Shizuku, success is Maps' task showing; without it, this activity losing top-resumed status, which
      * anything else opening over the home screen also causes.
      */
@@ -539,9 +544,19 @@ public class HomeActivity extends Activity {
                 mapsPending = false;   // another app was opened in the pane meanwhile
                 return;
             }
-            if (mapsAttempts > 0 && mapsUp()) {
+            long settle = BOOT_SETTLE_MS - SystemClock.elapsedRealtime();
+            if (settle > 0) {
+                Log.i(TAG, "box just booted; opening Maps in " + settle / 1000 + " s");
+                main.postDelayed(this, settle);   // tapping its tile still opens it right away
+                return;
+            }
+            if ((mapsAttempts > 0 || shizukuReady()) && mapsUp()) {
                 Log.i(TAG, "Maps window is up after " + mapsAttempts + " tries");
                 mapsPending = false;
+                return;
+            }
+            if (mapsAttempts > 0 && SystemClock.uptimeMillis() - mapsLaunchedAt < MAPS_RELAUNCH_MS) {
+                main.postDelayed(this, MAPS_CHECK_MS);   // still starting
                 return;
             }
             if (++mapsAttempts > MAX_MAPS_ATTEMPTS) {
@@ -551,7 +566,8 @@ public class HomeActivity extends Activity {
             }
             Log.i(TAG, "opening Maps window, try " + mapsAttempts);
             launchMaps();
-            main.postDelayed(this, MAPS_RETRY_MS);
+            mapsLaunchedAt = SystemClock.uptimeMillis();
+            main.postDelayed(this, MAPS_CHECK_MS);
         }
     };
 
