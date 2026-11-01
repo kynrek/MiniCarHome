@@ -145,11 +145,12 @@ public class HomeActivity extends Activity {
     private SharedPreferences prefs;
     private FrameLayout panel;
     private BrowserView browser;
-    private boolean panelShown, browserShown;
+    private boolean panelShown, browserShown, started;
     private TextView mediaTitle, mediaArtist, playButton, wifiLabel, cellLabel;
     private SignalBars wifiBars, cellBars;
     private TextView weatherTemp, weatherRange;
     private static final long WEATHER_REFRESH_MS = 15 * 60_000;
+    private static final long WEATHER_RETRY_MS = 60_000;   // after a failed fetch (e.g. not online yet after boot)
     private static final long SIGNAL_REFRESH_MS = 5000;
     private ImageView mediaArt;
     private LinearLayout progressRow;
@@ -237,6 +238,7 @@ public class HomeActivity extends Activity {
     @Override
     protected void onStart() {
         super.onStart();
+        started = true;
         showPanel();
         if (mapsInterrupted) {
             mapsInterrupted = false;
@@ -260,6 +262,7 @@ public class HomeActivity extends Activity {
     @Override
     protected void onStop() {
         super.onStop();
+        started = false;
         // Another app is now full screen: stop reopening Maps over it and take the overlays down. If Maps
         // hadn't come up yet (something covered the home screen during boot), carry on when we're back.
         mapsInterrupted = mapsPending;
@@ -1140,6 +1143,13 @@ public class HomeActivity extends Activity {
                     if (w != null) {
                         w.save(prefs);
                         main.post(HomeActivity.this::showWeather);
+                    } else {
+                        Log.i(TAG, "weather fetch failed; trying again in a minute");
+                        main.post(() -> {
+                            if (!started) return;   // onStart starts the ticks again
+                            main.removeCallbacks(weatherTick);
+                            main.postDelayed(weatherTick, WEATHER_RETRY_MS);
+                        });
                     }
                 }, "weather").start();
             }
