@@ -100,9 +100,8 @@ public class HomeActivity extends Activity {
     private long paneLaunchedAt;
     private static final long PANE_RESCUE_MS = 10000;
     private static final long MAPS_CHECK_MS = 2000;
-    // Give a slow start this long before opening it again: right after boot, Waze opened 5 times in 10 s came up
-    // with no map or GPS until restarted.
-    private static final long MAPS_RELAUNCH_MS = 10000;
+    private static final long MAPS_RELAUNCH_MS = 10000;   // give a slow start this long before opening it again
+    private static final long BOOT_ONLINE_WAIT_MS = 90000;   // since boot: open Maps offline after this
     private static final int MAX_MAPS_ATTEMPTS = 18;   // 3 minutes
     private int mapsAttempts;
     private long mapsLaunchedAt;
@@ -543,6 +542,16 @@ public class HomeActivity extends Activity {
                 mapsPending = false;   // another app was opened in the pane meanwhile
                 return;
             }
+            // Right after boot: this screen starts before Android unlocks the user's storage (about 12 s after it
+            // shows), and Wi-Fi and mobile data connect only after that. Waze opened before the unlock crashes
+            // ("credential encrypted storage isn't accessible"); opened before there's internet, it stays on
+            // offline maps with no GPS until restarted.
+            boolean booting = SystemClock.elapsedRealtime() < BOOT_ONLINE_WAIT_MS;
+            if (!getSystemService(android.os.UserManager.class).isUserUnlocked()
+                    || (mapsAttempts == 0 && booting && !online())) {
+                main.postDelayed(this, 500);
+                return;
+            }
             if ((mapsAttempts > 0 || shizukuReady()) && mapsUp()) {
                 Log.i(TAG, "Maps window is up after " + mapsAttempts + " tries");
                 mapsPending = false;
@@ -557,7 +566,8 @@ public class HomeActivity extends Activity {
                 mapsPending = false;
                 return;
             }
-            Log.i(TAG, "opening Maps window, try " + mapsAttempts);
+            Log.i(TAG, "opening Maps window, try " + mapsAttempts + " (" + SystemClock.elapsedRealtime() / 1000
+                    + " s after boot)");
             launchMaps();
             mapsLaunchedAt = SystemClock.uptimeMillis();
             main.postDelayed(this, MAPS_CHECK_MS);
@@ -568,6 +578,13 @@ public class HomeActivity extends Activity {
     public void onTopResumedActivityChanged(boolean top) {
         super.onTopResumedActivityChanged(top);
         topResumed = top;   // the next Maps retry checks whether Maps is up
+    }
+
+    /** Whether the default network has working internet. */
+    private boolean online() {
+        android.net.ConnectivityManager cm = getSystemService(android.net.ConnectivityManager.class);
+        android.net.NetworkCapabilities nc = cm.getNetworkCapabilities(cm.getActiveNetwork());
+        return nc != null && nc.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED);
     }
 
     /** Whether the main display app's window is showing. */
