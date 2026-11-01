@@ -76,6 +76,13 @@
             </intent-filter>
         </activity>
 
+        <!-- Reopens the home screen after an update, so the panel comes back without pressing Home. -->
+        <receiver android:name=".UpdateReceiver" android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+
         <!-- Lets the home screen read the playing track. Granted over ADB:
              cmd notification allow_listener com.kynrek.minicarhome/com.kynrek.minicarhome.MediaListener -->
         <service android:name=".MediaListener"
