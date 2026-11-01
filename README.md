@@ -182,8 +182,10 @@ adb shell pm grant moe.shizuku.privileged.api android.permission.WRITE_SECURE_SE
 adb shell settings put global force_resizable_activities 1   # lets apps marked non-resizable (TeamViewer) use a window
 ```
 
-Shizuku stops when the box reboots. Start it again from the Shizuku app (Start, via wireless debugging, which
-needs a Wi-Fi network, such as the car's CarPlay Wi-Fi), or pair it once and turn on its start-on-boot option.
+Shizuku stops when the box reboots. [Box Tools](https://github.com/kynrek/BoxTools) 1.7 or later starts it again
+after every boot, with or without Wi-Fi. Without Box Tools, start it from the Shizuku app (Start, via wireless
+debugging, which needs a Wi-Fi network), or pair it once and turn on its start-on-boot option, which also needs
+Wi-Fi at boot.
 
 Back to the stock home screen:
 `adb shell cmd package set-home-activity com.android.launcher3/.uioverrides.QuickstepLauncher`
