@@ -155,7 +155,7 @@ public class HomeActivity extends Activity {
     private static final long SIGNAL_REFRESH_MS = 5000;
     private ImageView mediaArt;
     private LinearLayout progressRow;
-    private ProgressBar mediaProgress;
+    private WavyProgress mediaProgress;
     private TextView mediaRemaining;
     private MediaSessionManager sessions;
     private MediaController controller;
@@ -1282,6 +1282,30 @@ public class HomeActivity extends Activity {
         seekScroll.addView(sk);
         s.addView(seekScroll, marginTop(ViewGroup.LayoutParams.WRAP_CONTENT, 6));
 
+        s.addView(text("Progress line", 14, TEXT), marginTop(ViewGroup.LayoutParams.WRAP_CONTENT, 12));
+        LinearLayout pl = new LinearLayout(this);
+        pl.setOrientation(LinearLayout.HORIZONTAL);
+        String style = prefs.getString("progress_style", "wavy");
+        pl.addView(choice("Wavy", !"straight".equals(style), v -> setString("progress_style", "wavy")));
+        pl.addView(choice("Straight", "straight".equals(style), v -> setString("progress_style", "straight")));
+        s.addView(pl, marginTop(ViewGroup.LayoutParams.WRAP_CONTENT, 6));
+        HorizontalScrollView thickScroll = new HorizontalScrollView(this);
+        thickScroll.setHorizontalScrollBarEnabled(false);
+        LinearLayout th = new LinearLayout(this);
+        th.setOrientation(LinearLayout.HORIZONTAL);
+        int thick = prefs.getInt("progress_thickness", 3);
+        String[] names = {"Thin", "Medium", "Thick"};
+        int[] values = {2, 3, 5};
+        for (int i = 0; i < 3; i++) {
+            int thickness = values[i];
+            th.addView(choice(names[i], thickness == thick, v -> {
+                prefs.edit().putInt("progress_thickness", thickness).apply();
+                rebuildPanel();
+            }));
+        }
+        thickScroll.addView(th);
+        s.addView(thickScroll, marginTop(ViewGroup.LayoutParams.WRAP_CONTENT, 6));
+
         s.addView(text("Signal", 14, TEXT), marginTop(ViewGroup.LayoutParams.WRAP_CONTENT, 12));
         LinearLayout sig = new LinearLayout(this);
         sig.setOrientation(LinearLayout.HORIZONTAL);
@@ -1888,11 +1912,9 @@ public class HomeActivity extends Activity {
         progressRow.setOrientation(LinearLayout.HORIZONTAL);
         progressRow.setGravity(Gravity.CENTER_VERTICAL);
         progressRow.setPadding(0, dp(2), 0, 0);
-        mediaProgress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
-        mediaProgress.setMax(1000);
-        mediaProgress.setProgressTintList(ColorStateList.valueOf(ACCENT));
-        mediaProgress.setProgressBackgroundTintList(ColorStateList.valueOf(0xFF3A474D));
-        progressRow.addView(mediaProgress, new LinearLayout.LayoutParams(0, dp(6), 1));
+        mediaProgress = new WavyProgress(this, ACCENT, 0xFF3A474D);
+        mediaProgress.setStyle(!"straight".equals(prefs.getString("progress_style", "wavy")), prefs.getInt("progress_thickness", 3));
+        progressRow.addView(mediaProgress, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
         mediaRemaining = text("", 12, DIM);
         mediaRemaining.setPadding(dp(8), 0, 0, 0);
         mediaRemaining.setSingleLine(true);
@@ -2285,7 +2307,7 @@ public class HomeActivity extends Activity {
         boolean playing = s.getState() == PlaybackState.STATE_PLAYING;
         long position = Math.min(duration, currentPosition(s));   // apps report position only occasionally
         progressRow.setVisibility(View.VISIBLE);
-        mediaProgress.setProgress((int) (1000 * position / duration));
+        mediaProgress.setProgress(position / (float) duration, playing);
         mediaRemaining.setText("\u2212" + clockTime(duration - position));
         if (playing) main.postDelayed(progressTick, 1000);
     }
