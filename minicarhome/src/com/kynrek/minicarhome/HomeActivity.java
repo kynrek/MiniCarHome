@@ -89,6 +89,7 @@ import java.util.Locale;
 public class HomeActivity extends Activity {
     private static final String TAG = "BoxHome";
     private static final String MAPS = "com.google.android.apps.maps";
+    private static final String WAZE = "com.waze";
     private static final int PICK_NONE = 0, PICK_SHORTCUT = 1, PICK_NAV = 2, PICK_ASSISTANT = 3;
     // The main window is a multi-window task with launch bounds: unlike a freeform window it has no caption
     // bar (▭ ✕). Freeform is only used briefly to close a window that has to be reopened at a new size.
@@ -851,6 +852,12 @@ public class HomeActivity extends Activity {
         saveShortcuts(list);
     }
 
+    private void addShortcut(String entry) {
+        List<String> list = shortcuts();
+        if (!list.contains(entry)) list.add(entry);
+        saveShortcuts(list);
+    }
+
     private void addShortcut(ComponentName cn) {
         List<String> list = shortcuts();
         String flat = cn.flattenToString();
@@ -1343,7 +1350,8 @@ public class HomeActivity extends Activity {
             String entry = list.get(i);
             if (navApp().equals(entry.split("/")[0])) continue;   // already the first tile
             View t = null;
-            if (entry.contains("/")) t = activityTile(ComponentName.unflattenFromString(entry));
+            if (isWazeEntry(entry)) t = wazeTile(entry);
+            else if (entry.contains("/")) t = activityTile(ComponentName.unflattenFromString(entry));
             else if (pm.getLaunchIntentForPackage(entry) != null) t = appTile(entry);
             if (t == null) continue;   // app was uninstalled
             tiles.add(editing ? editable(t, i, list.size()) : t);
@@ -1639,6 +1647,11 @@ public class HomeActivity extends Activity {
         else i.setData(Uri.parse("geo:0,0?q=" + q));
         if (i.resolveActivity(pm) == null) { showVoiceStatus("Can't navigate with " + appName(pkg)); return; }
         showVoiceStatus("→ " + place);
+        sendToMainApp(i, pkg);
+    }
+
+    /** Hand the main display app an intent (a destination), bringing its window back over whatever was open. */
+    private void sendToMainApp(Intent i, String pkg) {
         paneApp = null;   // the main display app comes back over whatever was open
         paneTarget = pkg;
         if (openedAt.containsKey(pkg)) {
@@ -1646,6 +1659,60 @@ public class HomeActivity extends Activity {
         } else {
             launchMaps();   // open its window first, then send the destination once it's settled
             main.postDelayed(() -> startPane(i, WINDOWING_MODE_MULTI_WINDOW), 1500);
+        }
+    }
+
+    // ---- Waze destination shortcuts ----
+    // Saved in the shortcut list as "waze:home", "waze:work" or "waze:<name>:<address>" (name and address
+    // Uri-encoded, so they hold no ':' or '|'). Waze's navigate=yes links start guidance on its fastest route
+    // straight away, skipping the route preview that a search inside Waze always shows.
+
+    static boolean isWazeEntry(String entry) { return entry.startsWith("waze:"); }
+
+    static String wazeEntry(String name, String address) {
+        return "waze:" + Uri.encode(name) + ":" + Uri.encode(address);
+    }
+
+    static String wazeLabel(String entry) {
+        String rest = entry.substring(5);
+        if (rest.equals("home")) return "Home";
+        if (rest.equals("work")) return "Work";
+        return Uri.decode(rest.split(":", 2)[0]);
+    }
+
+    static String wazeLink(String entry) {
+        String rest = entry.substring(5);
+        String query;
+        if (rest.equals("home") || rest.equals("work")) query = "favorite=" + rest;
+        else {
+            String[] parts = rest.split(":", 2);
+            query = "q=" + Uri.encode(Uri.decode(parts.length > 1 ? parts[1] : parts[0]));
+        }
+        return "https://waze.com/ul?" + query + "&navigate=yes";
+    }
+
+    private void startWaze(String entry) {
+        hideBrowser();
+        Intent i = new Intent(Intent.ACTION_VIEW, Uri.parse(wazeLink(entry))).setPackage(WAZE)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        if (i.resolveActivity(pm) == null) {
+            Toast.makeText(this, "Waze isn't installed", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (WAZE.equals(navApp())) { sendToMainApp(i, WAZE); return; }
+        if (prefs.getBoolean("apps_in_pane", true)) { launchInPane(i, WAZE); return; }
+        try {
+            startActivity(i);
+        } catch (RuntimeException e) {
+            Toast.makeText(this, "Can't open Waze: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private View wazeTile(String entry) {
+        try {
+            return tile(appIcon(WAZE), wazeLabel(entry), v -> startWaze(entry));
+        } catch (PackageManager.NameNotFoundException e) {
+            return null;   // Waze was uninstalled
         }
     }
 
@@ -1842,6 +1909,7 @@ public class HomeActivity extends Activity {
         private final EditText search;
         private final LinearLayout recentRow;
         private final View recentSection;
+        private View wazeGoTo;   // "Go to <typed text>" in the shortcut picker
         private final List<App> all = new ArrayList<>();
         private final List<App> shown = new ArrayList<>();
         private final BaseAdapter adapter;
@@ -1878,6 +1946,8 @@ public class HomeActivity extends Activity {
             search.setPadding(dp(14), dp(8), dp(14), dp(8));
             header.addView(search, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
             box.addView(header);
+
+            if (pick == PICK_SHORTCUT && pm.getLaunchIntentForPackage(WAZE) != null) box.addView(wazeSection(c));
 
             LinearLayout recent = new LinearLayout(c);
             recent.setOrientation(LinearLayout.VERTICAL);
@@ -1935,7 +2005,32 @@ public class HomeActivity extends Activity {
             fillRecent();
         }
 
+        /** Home, Work and (once something is typed) "Go to <it>": shortcuts that start Waze driving there. */
+        private View wazeSection(Context c) {
+            LinearLayout section = new LinearLayout(c);
+            section.setOrientation(LinearLayout.VERTICAL);
+            section.addView(sectionLabel("NAVIGATE WITH WAZE (TYPE AN ADDRESS FOR MORE)"));
+            LinearLayout row = new LinearLayout(c);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            Drawable icon;
+            try { icon = appIcon(WAZE); } catch (PackageManager.NameNotFoundException e) { icon = pm.getDefaultActivityIcon(); }
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(96), ViewGroup.LayoutParams.WRAP_CONTENT);
+            row.addView(tile(icon, "Home", v -> { hideBrowser(); addShortcut("waze:home"); }), lp);
+            row.addView(tile(icon, "Work", v -> { hideBrowser(); addShortcut("waze:work"); }), new LinearLayout.LayoutParams(lp));
+            wazeGoTo = tile(icon, "", null);
+            wazeGoTo.setVisibility(View.GONE);
+            row.addView(wazeGoTo, new LinearLayout.LayoutParams(dp(160), ViewGroup.LayoutParams.WRAP_CONTENT));
+            section.addView(row);
+            return section;
+        }
+
         private void filter(String q) {
+            if (wazeGoTo != null) {
+                String place = q.trim();
+                wazeGoTo.setVisibility(place.isEmpty() ? View.GONE : View.VISIBLE);
+                Drawable icon = ((ImageView) ((LinearLayout) wazeGoTo).getChildAt(0)).getDrawable();
+                bindTile(wazeGoTo, icon, "Go to " + place, v -> { hideBrowser(); addShortcut(wazeEntry(place, place)); });
+            }
             String needle = q.trim().toLowerCase(Locale.ROOT);
             shown.clear();
             for (App a : all) {

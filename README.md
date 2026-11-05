@@ -52,6 +52,8 @@ in front, so the panel disappears until you leave Settings.
   playing (Podcast Addict, Audible, Spotify, Symfonium…): previous/next track (|◀ ▶|), seek back and
   forward (↺ ↻) and play/pause. Tap the card to open that app.
 - **Shortcuts** to your car apps, scrolling if they don't fit, plus **All apps** and **Options** (settings).
+- **Waze destination shortcuts:** Home, Work or any address. One tap starts Waze driving there on its fastest
+  route, skipping the route review that a search inside Waze always shows.
 - **Voice button** (off by default): say "navigate to In-N-Out" (or just "In-N-Out"). The panel shows what it
   heard while the map stays in view, and the route starts in Waze or Google Maps straight away, with no results
   list to tap through. Speech is recognized on the box. Or set it to open Android's assistant or an app you choose
@@ -74,7 +76,7 @@ in front, so the panel disappears until you leave Settings.
 | Media buttons | Both (track + seek, default), Track only or Seek only |
 | Seek seconds | 5, 10, 15 (default), 30 or 60 |
 | Signal | Off (default; Android's own icons), top (bigger Wi-Fi and cell icons that replace Android's) or bottom |
-| Edit shortcuts | Move (◀ ▶), remove (✕) and add (+, from the full app list) |
+| Edit shortcuts | Move (◀ ▶), remove (✕) and add (+, from the full app list, or Waze Home, Work or a typed address) |
 | Reset shortcuts | Back to the default list |
 
 Everything is saved and kept across reboots.
