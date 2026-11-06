@@ -12,8 +12,8 @@ import android.view.View;
  * straight line), the rest thin and straight. Same look as the Music app's player.
  */
 final class WavyProgress extends View {
-    private static final float WAVELENGTH_DP = 27f;
-    private static final long PERIOD_MS = 2400;   // one wavelength of drift, about 11 dp a second
+    private static final float WAVELENGTH_DP = 36f;
+    private static final long PERIOD_MS = 3200;   // one wavelength of drift, about 11 dp a second
 
     private final Paint played = new Paint(Paint.ANTI_ALIAS_FLAG), rest = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Path path = new Path();
