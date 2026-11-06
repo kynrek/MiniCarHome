@@ -99,6 +99,8 @@ public class HomeActivity extends Activity {
     private static final long MAPS_CHECK_MS = 2000;
     private static final long MAPS_RELAUNCH_MS = 10000;   // give a slow start this long before opening it again
     private static final long BOOT_ONLINE_WAIT_MS = 90000;   // since boot: open Maps offline after this
+    // Main display apps that need internet when they start (see mapsRetry); others open as soon as they can.
+    private static final java.util.Set<String> ONLINE_AT_START = new java.util.HashSet<>(java.util.Arrays.asList(WAZE, MAPS));
     private static final int MAX_MAPS_ATTEMPTS = 18;   // 3 minutes
     private int mapsAttempts;
     private long mapsLaunchedAt;
@@ -549,10 +551,11 @@ public class HomeActivity extends Activity {
             // Right after boot: this screen starts before Android unlocks the user's storage (about 12 s after it
             // shows), and Wi-Fi and mobile data connect only after that. Waze opened before the unlock crashes
             // ("credential encrypted storage isn't accessible"); opened before there's internet, it stays on
-            // offline maps with no GPS until restarted.
+            // offline maps with no GPS until restarted. Offline map apps (OsmAnd) don't wait for internet: in the
+            // car with no data connection that wait ran the full BOOT_ONLINE_WAIT_MS.
             boolean booting = SystemClock.elapsedRealtime() < BOOT_ONLINE_WAIT_MS;
             if (!getSystemService(android.os.UserManager.class).isUserUnlocked()
-                    || (mapsAttempts == 0 && booting && !online())) {
+                    || (mapsAttempts == 0 && booting && ONLINE_AT_START.contains(navApp()) && !online())) {
                 main.postDelayed(this, 500);
                 return;
             }
