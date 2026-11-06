@@ -476,9 +476,13 @@ public class HomeActivity extends Activity {
         }
     }
 
-    /** Whether the app's top screen is letterboxed, from "dumpsys activity activities" run through Shizuku. */
+    /**
+     * Whether the app's top screen is letterboxed, from "dumpsys activity activities" run through Shizuku.
+     * Not "-p pkg": that also has the app's own process dump itself while Android holds its window lock, so an
+     * app opening a dialog or resizing at that moment freezes both until a 2 s timeout, five checks in a row.
+     */
     private boolean letterboxed(String pkg) {
-        String out = shell("dumpsys", "activity", "-p", pkg, "activities");
+        String out = shell("dumpsys", "activity", "activities");
         java.util.regex.Matcher m = java.util.regex.Pattern
                 .compile("\\* Hist +#\\d+: ActivityRecord\\{\\S+ u0 " + java.util.regex.Pattern.quote(pkg) + "/").matcher(out);
         int at = m.find() ? m.start() + 1 : -1;   // its task's top activity comes first
