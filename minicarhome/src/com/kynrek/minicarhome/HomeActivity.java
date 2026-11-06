@@ -1289,6 +1289,12 @@ public class HomeActivity extends Activity {
         pl.addView(choice("Wavy", !"straight".equals(style), v -> setString("progress_style", "wavy")));
         pl.addView(choice("Straight", "straight".equals(style), v -> setString("progress_style", "straight")));
         s.addView(pl, marginTop(ViewGroup.LayoutParams.WRAP_CONTENT, 6));
+        LinearLayout an = new LinearLayout(this);
+        an.setOrientation(LinearLayout.HORIZONTAL);
+        boolean animate = prefs.getBoolean("progress_animate", true);
+        an.addView(choice("Animated", animate, v -> { prefs.edit().putBoolean("progress_animate", true).apply(); rebuildPanel(); }));
+        an.addView(choice("Still", !animate, v -> { prefs.edit().putBoolean("progress_animate", false).apply(); rebuildPanel(); }));
+        s.addView(an, marginTop(ViewGroup.LayoutParams.WRAP_CONTENT, 6));
         HorizontalScrollView thickScroll = new HorizontalScrollView(this);
         thickScroll.setHorizontalScrollBarEnabled(false);
         LinearLayout th = new LinearLayout(this);
@@ -1914,6 +1920,7 @@ public class HomeActivity extends Activity {
         progressRow.setPadding(0, dp(2), 0, 0);
         mediaProgress = new WavyProgress(this, ACCENT, 0xFF3A474D);
         mediaProgress.setStyle(!"straight".equals(prefs.getString("progress_style", "wavy")), prefs.getInt("progress_thickness", 3));
+        mediaProgress.setAnimated(prefs.getBoolean("progress_animate", true));
         progressRow.addView(mediaProgress, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
         mediaRemaining = text("", 12, DIM);
         mediaRemaining.setPadding(dp(8), 0, 0, 0);

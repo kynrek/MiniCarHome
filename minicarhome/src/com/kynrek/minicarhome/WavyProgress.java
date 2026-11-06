@@ -4,20 +4,25 @@ import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.Path;
+import android.os.SystemClock;
 import android.view.View;
 
 /**
- * The media card's progress line: the played part as a gentle wave, drawn still and growing with the
- * playhead (or a straight line), the rest thin and straight. Same look as the Music app's player.
+ * The media card's progress line: the played part as a gentle wave that drifts while playing (or is
+ * drawn still, per Settings, or a straight line), the rest thin and straight. Same look as the Music app's player.
  */
 final class WavyProgress extends View {
     private static final float WAVELENGTH_DP = 36f;
+    private static final long PERIOD_MS = 3200;   // one wavelength of drift, about 11 dp a second
+    // Redraw a drifting wave 10 times a second on a 100 ms grid of the uptime clock: the drift is slow,
+    // and the Music app's line uses the same grid, so the two land in the same display frame.
+    private static final long FRAME_MS = 100;
 
     private final Paint played = new Paint(Paint.ANTI_ALIAS_FLAG), rest = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Path path = new Path();
     private final float density;
     private float fraction;
-    private boolean wavy = true;
+    private boolean wavy = true, animated = true, playing;
     private float stroke;
 
     WavyProgress(Context c, int playedColor, int restColor) {
@@ -31,6 +36,12 @@ final class WavyProgress extends View {
         played.setColor(playedColor);
         rest.setColor(restColor);
         setStyle(true, 3);
+    }
+
+    /** Whether the wave drifts while playing (Settings > Progress line > Animate); off, it's drawn still. */
+    void setAnimated(boolean animated) {
+        this.animated = animated;
+        invalidate();
     }
 
     void setStyle(boolean wavy, float thicknessDp) {
@@ -51,6 +62,7 @@ final class WavyProgress extends View {
 
     void setProgress(float fraction, boolean playing) {
         this.fraction = Math.max(0f, Math.min(1f, fraction));
+        this.playing = playing;
         invalidate();
     }
 
@@ -71,16 +83,22 @@ final class WavyProgress extends View {
             return;
         }
         float wl = WAVELENGTH_DP * density, a = amplitude();
+        boolean drift = playing && animated;
+        float phase = drift ? (SystemClock.uptimeMillis() % PERIOD_MS) / (float) PERIOD_MS : 0f;
         path.rewind();
         float step = Math.max(1f, 1.5f * density);
         boolean first = true;
         for (float px = left; ; px += step) {
             if (px > x) px = x;
             float ease = Math.min(1f, (px - left) / (wl / 2));
-            float y = cy + (float) (a * ease * Math.sin(2 * Math.PI * ((px - left) / wl)));
+            float y = cy + (float) (a * ease * Math.sin(2 * Math.PI * ((px - left) / wl - phase)));
             if (first) { path.moveTo(px, y); first = false; } else path.lineTo(px, y);
             if (px >= x) break;
         }
         canvas.drawPath(path, played);
+        if (drift) {
+            long now = SystemClock.uptimeMillis();
+            postInvalidateDelayed(Math.max(1, FRAME_MS - now % FRAME_MS));
+        }
     }
 }
