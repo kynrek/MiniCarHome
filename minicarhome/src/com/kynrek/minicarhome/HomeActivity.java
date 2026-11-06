@@ -37,10 +37,6 @@ import android.speech.RecognitionListener;
 import android.speech.RecognizerIntent;
 import android.speech.SpeechRecognizer;
 import android.net.Uri;
-import android.os.IBinder;
-import rikka.shizuku.Shizuku;
-import rikka.shizuku.ShizukuBinderWrapper;
-import rikka.shizuku.SystemServiceHelper;
 import android.telephony.SignalStrength;
 import android.telephony.TelephonyManager;
 import android.text.Editable;
@@ -97,7 +93,7 @@ public class HomeActivity extends Activity {
     private static final int FREEFORM_CAPTION_DP = 24;   // measured: 24 px at 160 dpi; scales with display size
     private final java.util.Map<String, Rect> openedAt = new java.util.HashMap<>();   // pane apps and their window bounds
     private String reopening;   // app being closed and reopened at a new size; ignore other starts meanwhile
-    private String paneTarget;   // the app most recently opened in the pane
+    private volatile String paneTarget;   // the app most recently opened in the pane (read by window threads)
     private long paneLaunchedAt;
     private static final long PANE_RESCUE_MS = 10000;
     private static final long MAPS_CHECK_MS = 2000;
@@ -107,6 +103,7 @@ public class HomeActivity extends Activity {
     private int mapsAttempts;
     private long mapsLaunchedAt;
     private boolean mapsPending, mapsInterrupted, topResumed, editing;
+    private int mapsGen;   // counts ensureMaps() rounds
     private String paneApp;   // app opened in the main pane over the main display app, if any
     /**
      * Launcher icons that only bounce to another screen and close themselves; in a freeform window the
@@ -187,7 +184,6 @@ public class HomeActivity extends Activity {
         columns = Math.max(MIN_COLUMNS, Math.min(MAX_COLUMNS, prefs.getInt("columns", DEFAULT_COLUMNS)));
         panelLeft = prefs.getBoolean("panel_left", false);
         setContentView(buildBackdrop());
-        Shizuku.addBinderReceivedListenerSticky(shizukuReceived, main);
         // An app installed, updated (new name or icon) or removed: redraw the shortcuts.
         android.content.IntentFilter apps = new android.content.IntentFilter();
         apps.addAction(Intent.ACTION_PACKAGE_ADDED);
@@ -217,7 +213,7 @@ public class HomeActivity extends Activity {
     protected void onDestroy() {
         super.onDestroy();
         unregisterReceiver(appsChanged);
-        Shizuku.removeBinderReceivedListener(shizukuReceived);
+        windowOps.shutdown();
     }
 
     @Override
@@ -284,8 +280,9 @@ public class HomeActivity extends Activity {
 
     /**
      * An app just opened in the pane covered the home screen: its splash screen started the main screen in a
-     * new task (Aladdin Connect does this), and a new task opens full screen. Remember the app. With Shizuku,
-     * close that task and open the app again the hand-off way; without it, the app stays full screen.
+     * new task (Aladdin Connect does this), and a new task opens full screen. Remember the app. With window
+     * control (Box Tools), close that task and open the app again the hand-off way; without it, the app stays
+     * full screen.
      */
     private void rescuePaneApp() {
         if (paneTarget == null || SystemClock.uptimeMillis() - paneLaunchedAt > PANE_RESCUE_MS) return;
@@ -296,26 +293,21 @@ public class HomeActivity extends Activity {
         prefs.edit().putStringSet("handoff_apps", apps).apply();
         Log.i(TAG, pkg + " hands off to a new task");
         Intent i = pm.getLaunchIntentForPackage(pkg);
-        if (i == null || !shizukuReady()) return;
-        Integer task = findTask(pkg);
-        if (task == null) return;
-        try {
-            Object atm = activityTasks();
-            atm.getClass().getMethod("removeTask", int.class).invoke(atm, task);
-        } catch (ReflectiveOperationException | RuntimeException e) {
-            Log.w(TAG, "removeTask failed", e);
-            return;
-        }
-        main.postDelayed(() -> startHandoffApp(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), pkg), 600);
+        if (i == null || !windowsReady()) return;
+        windowOps.execute(() -> {
+            TaskRef task = findTask(pkg);
+            if (task == null || !removeTask(task)) return;
+            main.postDelayed(() -> startHandoffApp(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), pkg), 600);
+        });
     }
 
     /**
      * Apps whose splash screen opens the main screen in a new task: started freeform, that task inherits
-     * freeform but not the pane's bounds, so Shizuku resizes it into the pane once it appears (it keeps the
-     * ▭ ✕ caption bar). Without Shizuku they open full screen, which at least shows all of them.
+     * freeform but not the pane's bounds, so it's resized into the pane once it appears (it keeps the
+     * ▭ ✕ caption bar). Without window control they open full screen, which at least shows all of them.
      */
     private void startHandoffApp(Intent i, String pkg) {
-        if (!shizukuReady()) {
+        if (!windowsReady()) {
             paneLaunchedAt = 0;   // full screen on purpose
             try { startActivity(i); } catch (RuntimeException e) { Log.w(TAG, "launch failed", e); }
             return;
@@ -334,51 +326,99 @@ public class HomeActivity extends Activity {
         return r;
     }
 
-    // ---- Shizuku (optional) ----
-    // A helper app with adb-level access. When it's running and has allowed MiniCarHome, MiniCarHome can resize
-    // other apps' windows, which Android otherwise doesn't allow.
+    // ---- Window control (through Box Tools) ----
+    // Android only lets the shell user see and arrange other apps' windows. Box Tools (same signing key, 1.9 or
+    // later) runs those commands as the shell user through the box's own adbd, for apps holding its CONTROL
+    // permission. Its calls block for a moment (up to about a second to switch a window's mode), so they run off
+    // the main thread: on windowOps, one at a time, or on the letterbox check's own thread.
 
-    private static final int SHIZUKU_REQUEST = 7;
+    private static final Uri BOX_SHELL = Uri.parse("content://local.boxtools.shell");
+    private final java.util.concurrent.ExecutorService windowOps =
+            java.util.concurrent.Executors.newSingleThreadExecutor(r -> new Thread(r, "window-ops"));
+    // One task line of "am stack list"; topActivity is missing for tasks with no activity.
+    private static final java.util.regex.Pattern TASK_LINE = java.util.regex.Pattern.compile(
+            "taskId=(\\d+): (\\S+) bounds=\\S+ userId=\\d+ visible=(true|false)(?: topActivity=ComponentInfo\\{([^}]+)\\})?");
 
-    private final Shizuku.OnBinderReceivedListener shizukuReceived = () -> {
-        try {
-            if (Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED
-                    && !Shizuku.shouldShowRequestPermissionRationale()) {
-                Shizuku.requestPermission(SHIZUKU_REQUEST);   // asks once, in Shizuku's own dialog
-            }
-        } catch (RuntimeException e) { Log.w(TAG, "Shizuku permission check failed", e); }
-    };
+    /** A task as "am stack list" shows it. */
+    private static final class TaskRef {
+        final int id;
+        final ComponentName top;
+        final boolean visible;
 
-    private boolean shizukuReady() {
-        try {
-            return Shizuku.pingBinder() && Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED;
-        } catch (RuntimeException e) {
-            return false;
+        TaskRef(int id, ComponentName top, boolean visible) {
+            this.id = id;
+            this.top = top;
+            this.visible = visible;
         }
     }
 
-    /** IActivityTaskManager, called through Shizuku (as the shell user). */
-    private Object activityTasks() throws ReflectiveOperationException {
-        IBinder b = new ShizukuBinderWrapper(SystemServiceHelper.getSystemService("activity_task"));
-        return Class.forName("android.app.IActivityTaskManager$Stub").getMethod("asInterface", IBinder.class).invoke(null, b);
+    /** Whether Box Tools can arrange windows for us. Quick enough for the main thread. */
+    private boolean windowsReady() {
+        return pm.resolveContentProvider("local.boxtools.shell", 0) != null;
     }
 
-    /** The id of the app's most recent visible task, or null. */
-    private Integer findTask(String pkg) {
-        android.app.ActivityManager.RunningTaskInfo t = findTaskInfo(pkg);
-        return t == null ? null : t.taskId;
+    /** Call Box Tools' shell provider. Null if it's missing or the call failed. Not on the main thread. */
+    private Bundle boxCall(String method, String arg, Bundle extras) {
+        try {
+            Bundle b = getContentResolver().call(BOX_SHELL, method, arg, extras);
+            if (b != null && b.containsKey("error")) {
+                Log.w(TAG, "Box Tools " + method + ": " + b.getString("error"));
+                return null;
+            }
+            return b;
+        } catch (RuntimeException e) {
+            Log.w(TAG, "Box Tools " + method + " failed", e);
+            return null;
+        }
+    }
+
+    /** Run a command as the shell user through Box Tools and return its output ("" on failure). */
+    private String shell(String command) {
+        Bundle b = boxCall("exec", command, null);
+        String out = b == null ? null : b.getString("out");
+        return out == null ? "" : out;
+    }
+
+    /** The app's frontmost task, or null. */
+    private TaskRef findTask(String pkg) {
+        return findTask(shell("am stack list"), pkg);
+    }
+
+    /** Whether the app has a task showing; null if Box Tools couldn't tell. */
+    private Boolean taskVisible(String pkg) {
+        String list = shell("am stack list");
+        if (list.isEmpty()) return null;
+        TaskRef t = findTask(list, pkg);
+        return t != null && t.visible;
+    }
+
+    /** The app's frontmost task in "am stack list" output (it goes front to back), or null. */
+    private static TaskRef findTask(String list, String pkg) {
+        java.util.regex.Matcher m = TASK_LINE.matcher(list);
+        while (m.find()) {
+            ComponentName top = m.group(4) != null ? ComponentName.unflattenFromString(m.group(4)) : null;
+            if (top == null) top = ComponentName.unflattenFromString(m.group(2));
+            if (top != null && pkg.equals(top.getPackageName())) {
+                return new TaskRef(Integer.parseInt(m.group(1)), top, "true".equals(m.group(3)));
+            }
+        }
+        return null;
     }
 
     /**
      * Multi-window would letterbox the task's top screen: it's locked to portrait in its manifest, or marked as
      * not resizable (such screens usually lock orientation from code, like TeamViewer's EULA).
      */
-    private boolean portraitOnly(android.app.ActivityManager.RunningTaskInfo task) {
+    private boolean portraitOnly(TaskRef task) {
+        String dump = shell("dumpsys activity activities");
+        int at = dump.indexOf(" #" + task.id + " ");
+        if (at >= 0) {
+            int next = dump.indexOf("* Task{", at);
+            String block = dump.substring(at, next < 0 ? dump.length() : next);
+            if (block.contains("resizeMode=RESIZE_MODE_UNRESIZEABLE")) return true;
+        }
         try {
-            if (android.app.TaskInfo.class.getField("resizeMode").getInt(task) == 0) return true;   // RESIZE_MODE_UNRESIZEABLE
-        } catch (ReflectiveOperationException | RuntimeException ignored) { }
-        try {
-            int o = pm.getActivityInfo(task.topActivity, 0).screenOrientation;
+            int o = pm.getActivityInfo(task.top, 0).screenOrientation;
             return o == android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
                     || o == android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
                     || o == android.content.pm.ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT
@@ -388,101 +428,75 @@ public class HomeActivity extends Activity {
         }
     }
 
-    private android.app.ActivityManager.RunningTaskInfo findTaskInfo(String pkg) {
-        try {
-            Object atm = activityTasks();
-            for (Method m : atm.getClass().getMethods()) {
-                if (!m.getName().equals("getTasks")) continue;
-                // getTasks(int maxNum, boolean filterOnlyVisibleRecents, boolean keepIntentExtra, int displayId)
-                Class<?>[] types = m.getParameterTypes();
-                Object[] args = new Object[types.length];
-                for (int k = 0; k < types.length; k++) {
-                    args[k] = types[k] == boolean.class ? (Object) false : (Object) (k == 0 ? 20 : 0);
-                }
-                for (Object o : (List<?>) m.invoke(atm, args)) {
-                    android.app.ActivityManager.RunningTaskInfo t = (android.app.ActivityManager.RunningTaskInfo) o;
-                    ComponentName top = t.topActivity != null ? t.topActivity : t.baseActivity;
-                    if (top != null && pkg.equals(top.getPackageName())) return t;
-                }
-                return null;
-            }
-        } catch (ReflectiveOperationException | RuntimeException e) {
-            Log.w(TAG, "getTasks failed", e);
-        }
-        return null;
-    }
-
     /**
      * Put the app's task in the pane at its full size: caption-less multi-window like any other app. Screens
      * locked to portrait get letterboxed into a narrow column there, so those get a freeform window instead,
      * which ignores the lock (and keeps a ▭ ✕ caption bar; Android keeps freeform windows below the status
      * bar). The lock is often set from code, so after switching, MiniCarHome checks whether Android letterboxed
-     * the app and moves it to freeform if so.
+     * the app and moves it to freeform if so. Call on the main thread; the work happens on windowOps.
      */
     private void fitTask(String pkg, Rect captioned) {
-        android.app.ActivityManager.RunningTaskInfo task = findTaskInfo(pkg);
-        if (task == null) return;
-        if (portraitOnly(task)) {
-            setTaskMode(task, WINDOWING_MODE_FREEFORM, captioned);
-            return;
-        }
-        setTaskMode(task, WINDOWING_MODE_MULTI_WINDOW, mapsBounds());
-        new Thread(() -> {
-            // Letterboxed twice in a row: a portrait splash screen (Audible's) is letterboxed only briefly, and a
-            // sign-in screen can take over a few seconds later (Netflix's).
-            boolean before = false;
-            for (long wait : new long[]{1200, 1500, 1500, 2000, 2000}) {
-                SystemClock.sleep(wait);
-                if (!pkg.equals(paneTarget)) return;
-                boolean now = letterboxed(pkg);
-                boolean twice = now && before;
-                before = now;
-                if (!twice) continue;
-                Log.i(TAG, pkg + " is letterboxed in the pane; using a freeform window");
-                main.post(() -> {
-                    android.app.ActivityManager.RunningTaskInfo t = findTaskInfo(pkg);
-                    if (t != null && pkg.equals(paneTarget)) setTaskMode(t, WINDOWING_MODE_FREEFORM, captionedBounds());
-                });
+        Rect pane = mapsBounds();
+        windowOps.execute(() -> {
+            if (!pkg.equals(paneTarget)) return;
+            TaskRef task = findTask(pkg);
+            if (task == null) return;
+            if (portraitOnly(task)) {
+                setTaskMode(task, WINDOWING_MODE_FREEFORM, captioned);
                 return;
             }
-        }, "letterbox-check").start();
+            setTaskMode(task, WINDOWING_MODE_MULTI_WINDOW, pane);
+            new Thread(() -> {
+                // Letterboxed twice in a row: a portrait splash screen (Audible's) is letterboxed only briefly,
+                // and a sign-in screen can take over a few seconds later (Netflix's).
+                boolean before = false;
+                for (long wait : new long[]{1200, 1500, 1500, 2000, 2000}) {
+                    SystemClock.sleep(wait);
+                    if (!pkg.equals(paneTarget)) return;
+                    boolean now = letterboxed(pkg);
+                    boolean twice = now && before;
+                    before = now;
+                    if (!twice) continue;
+                    Log.i(TAG, pkg + " is letterboxed in the pane; using a freeform window");
+                    TaskRef t = findTask(pkg);
+                    if (t != null && pkg.equals(paneTarget)) setTaskMode(t, WINDOWING_MODE_FREEFORM, captioned);
+                    return;
+                }
+            }, "letterbox-check").start();
+        });
     }
 
-    /** Set a task's window mode and bounds with a WindowContainerTransaction, or at least resize it. */
-    private void setTaskMode(android.app.ActivityManager.RunningTaskInfo task, int mode, Rect bounds) {
-        try {
-            Object atm = activityTasks();
-            Object token = android.app.TaskInfo.class.getField("token").get(task);
-            Class<?> tokenClass = Class.forName("android.window.WindowContainerToken");
-            Class<?> wctClass = Class.forName("android.window.WindowContainerTransaction");
-            Object wct = wctClass.getConstructor().newInstance();
-            wctClass.getMethod("setWindowingMode", tokenClass, int.class).invoke(wct, token, mode);
-            wctClass.getMethod("setBounds", tokenClass, Rect.class).invoke(wct, token, bounds);
-            Object controller = atm.getClass().getMethod("getWindowOrganizerController").invoke(atm);
-            IBinder b = new ShizukuBinderWrapper((IBinder) controller.getClass().getMethod("asBinder").invoke(controller));
-            Object wo = Class.forName("android.window.IWindowOrganizerController$Stub")
-                    .getMethod("asInterface", IBinder.class).invoke(null, b);
-            wo.getClass().getMethod("applyTransaction", wctClass).invoke(wo, wct);
-            if (mode != WINDOWING_MODE_FREEFORM) return;
-            // Switching to freeform keeps the old size and moves it below the status bar; resize it after.
-        } catch (ReflectiveOperationException | RuntimeException e) {
-            Log.w(TAG, "window transaction failed; resizing instead", e);
-        }
-        try {
-            Object atm = activityTasks();
-            atm.getClass().getMethod("resizeTask", int.class, Rect.class, int.class).invoke(atm, task.taskId, bounds, 0);
-        } catch (ReflectiveOperationException | RuntimeException e) {
-            Log.w(TAG, "resizeTask failed", e);
-        }
+    /** Set a task's window mode and bounds (Box Tools' TaskWindow, as the shell user). */
+    private boolean setTaskMode(TaskRef task, int mode, Rect bounds) {
+        Bundle extras = new Bundle();
+        extras.putInt("taskId", task.id);
+        extras.putInt("mode", mode);
+        extras.putParcelable("bounds", bounds);
+        return boxOk("windowMode", extras);
+    }
+
+    /** Close a task and its screens. */
+    private boolean removeTask(TaskRef task) {
+        Bundle extras = new Bundle();
+        extras.putInt("taskId", task.id);
+        return boxOk("removeTask", extras);
+    }
+
+    private boolean boxOk(String method, Bundle extras) {
+        Bundle b = boxCall(method, null, extras);
+        String out = b == null ? null : b.getString("out");
+        if ("ok".equals(out)) return true;
+        if (out != null) Log.w(TAG, method + " " + extras + ": " + out);
+        return false;
     }
 
     /**
-     * Whether the app's top screen is letterboxed, from "dumpsys activity activities" run through Shizuku.
+     * Whether the app's top screen is letterboxed, from "dumpsys activity activities".
      * Not "-p pkg": that also has the app's own process dump itself while Android holds its window lock, so an
      * app opening a dialog or resizing at that moment freezes both until a 2 s timeout, five checks in a row.
      */
     private boolean letterboxed(String pkg) {
-        String out = shell("dumpsys", "activity", "activities");
+        String out = shell("dumpsys activity activities");
         java.util.regex.Matcher m = java.util.regex.Pattern
                 .compile("\\* Hist +#\\d+: ActivityRecord\\{\\S+ u0 " + java.util.regex.Pattern.quote(pkg) + "/").matcher(out);
         int at = m.find() ? m.start() + 1 : -1;   // its task's top activity comes first
@@ -490,25 +504,6 @@ public class HomeActivity extends Activity {
         int next = out.indexOf("* Hist", at);
         String block = out.substring(at, next < 0 ? out.length() : next);
         return block.contains("areBoundsLetterboxed=true");
-    }
-
-    /** Run a command as the shell user through Shizuku and return its output ("" on failure). */
-    private static String shell(String... cmd) {
-        try {
-            Method m = Shizuku.class.getDeclaredMethod("newProcess", String[].class, String[].class, String.class);
-            m.setAccessible(true);
-            Process p = (Process) m.invoke(null, cmd, null, null);
-            java.io.ByteArrayOutputStream buf = new java.io.ByteArrayOutputStream();
-            try (InputStream in = p.getInputStream()) {
-                byte[] chunk = new byte[16384];
-                for (int n; (n = in.read(chunk)) > 0; ) buf.write(chunk, 0, n);
-            }
-            p.waitFor();
-            return buf.toString("UTF-8");
-        } catch (Exception e) {
-            Log.w(TAG, "shell " + cmd[0] + " failed", e);
-            return "";
-        }
     }
 
     private java.util.Set<String> handoffApps() {
@@ -532,12 +527,13 @@ public class HomeActivity extends Activity {
     /**
      * Open the Maps window and keep retrying until it actually comes up: right after boot Maps can be
      * unavailable or the start can be dropped, which left an empty slot until it was tapped.
-     * With Shizuku, success is Maps' task showing; without it, this activity losing top-resumed status, which
-     * anything else opening over the home screen also causes.
+     * With window control (Box Tools), success is Maps' task showing; without it, this activity losing
+     * top-resumed status, which anything else opening over the home screen also causes.
      */
     private void ensureMaps() {
         mapsAttempts = 0;
         mapsPending = true;
+        mapsGen++;   // a check still running for an earlier round is ignored
         paneTarget = navApp();   // opening another app in the pane changes this and ends the retries
         main.removeCallbacks(mapsRetry);
         main.post(mapsRetry);
@@ -560,27 +556,49 @@ public class HomeActivity extends Activity {
                 main.postDelayed(this, 500);
                 return;
             }
-            if ((mapsAttempts > 0 || shizukuReady()) && mapsUp()) {
-                Log.i(TAG, "Maps window is up after " + mapsAttempts + " tries");
-                mapsPending = false;
+            if (!windowsReady()) {
+                // Before the first try there's nothing to see; after it, something above us is most likely Maps.
+                mapsStep(mapsAttempts > 0 && !topResumed);
                 return;
             }
-            if (mapsAttempts > 0 && SystemClock.uptimeMillis() - mapsLaunchedAt < MAPS_RELAUNCH_MS) {
-                main.postDelayed(this, MAPS_CHECK_MS);   // still starting
-                return;
-            }
-            if (++mapsAttempts > MAX_MAPS_ATTEMPTS) {
-                Log.w(TAG, "Maps window did not come up after " + MAX_MAPS_ATTEMPTS + " tries");
-                mapsPending = false;
-                return;
-            }
-            Log.i(TAG, "opening Maps window, try " + mapsAttempts + " (" + SystemClock.elapsedRealtime() / 1000
-                    + " s after boot)");
-            launchMaps();
-            mapsLaunchedAt = SystemClock.uptimeMillis();
-            main.postDelayed(this, MAPS_CHECK_MS);
+            // Ask Box Tools whether Maps' task is showing, off the main thread.
+            int gen = mapsGen;
+            String app = navApp();
+            windowOps.execute(() -> {
+                Boolean up = taskVisible(app);
+                main.post(() -> {
+                    if (gen == mapsGen && mapsPending) mapsStep(up != null ? up : mapsAttempts > 0 && !topResumed);
+                });
+            });
         }
     };
+
+    /** The rest of a Maps retry, once it's known whether the Maps window is up. */
+    private void mapsStep(boolean up) {
+        if (paneTarget != null && !paneTarget.equals(navApp())) {
+            mapsPending = false;   // another app was opened in the pane while Box Tools was asked
+            return;
+        }
+        if (up) {
+            Log.i(TAG, "Maps window is up after " + mapsAttempts + " tries");
+            mapsPending = false;
+            return;
+        }
+        if (mapsAttempts > 0 && SystemClock.uptimeMillis() - mapsLaunchedAt < MAPS_RELAUNCH_MS) {
+            main.postDelayed(mapsRetry, MAPS_CHECK_MS);   // still starting
+            return;
+        }
+        if (++mapsAttempts > MAX_MAPS_ATTEMPTS) {
+            Log.w(TAG, "Maps window did not come up after " + MAX_MAPS_ATTEMPTS + " tries");
+            mapsPending = false;
+            return;
+        }
+        Log.i(TAG, "opening Maps window, try " + mapsAttempts + " (" + SystemClock.elapsedRealtime() / 1000
+                + " s after boot)");
+        launchMaps();
+        mapsLaunchedAt = SystemClock.uptimeMillis();
+        main.postDelayed(mapsRetry, MAPS_CHECK_MS);
+    }
 
     @Override
     public void onTopResumedActivityChanged(boolean top) {
@@ -593,13 +611,6 @@ public class HomeActivity extends Activity {
         android.net.ConnectivityManager cm = getSystemService(android.net.ConnectivityManager.class);
         android.net.NetworkCapabilities nc = cm.getNetworkCapabilities(cm.getActiveNetwork());
         return nc != null && nc.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED);
-    }
-
-    /** Whether the main display app's window is showing. */
-    private boolean mapsUp() {
-        if (!shizukuReady()) return !topResumed;   // something is above us: most likely Maps
-        android.app.ActivityManager.RunningTaskInfo t = findTaskInfo(navApp());
-        return t != null && t.isVisible();
     }
 
     /** Back to the home screen: close the app in the main window (if any) and show the main display app. */
@@ -663,9 +674,9 @@ public class HomeActivity extends Activity {
             if (pkg.equals(paneTarget) && !pkg.equals(reopening)) startPane(i, WINDOWING_MODE_MULTI_WINDOW);
         }, 1000);
         // Some apps open their real screen in another task a moment later (Files, TeamViewer), which misses the
-        // pane. With Shizuku, snap whatever task the app ended up in into the pane.
+        // pane. With window control, snap whatever task the app ended up in into the pane.
         main.postDelayed(() -> {
-            if (pkg.equals(paneTarget) && !pkg.equals(reopening) && shizukuReady()) fitTask(pkg, captionedBounds());
+            if (pkg.equals(paneTarget) && !pkg.equals(reopening) && windowsReady()) fitTask(pkg, captionedBounds());
         }, 2500);
     }
 

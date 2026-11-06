@@ -111,6 +111,8 @@ and every app A–Z. Tap an app and it opens there.
 - **Stock Home** icon: opens the box's original launcher.
 - Closes and reopens the main window's app when you change the panel width or side. Android doesn't let
   one app resize another app's open window.
+- **Window control** for MiniCarHome (1.9 or later): sees and arranges other apps' windows as the shell user,
+  through the box's own ADB (see [Window control](#window-control-box-tools)).
 
 ## Install
 
@@ -172,23 +174,20 @@ adb shell settings put secure accessibility_enabled 1
 adb shell pm disable-user --user 0 com.applepie.floatingball   # optional: hide the vendor floating ball
 ```
 
-### Optional: Shizuku
+### Window control (Box Tools)
 
 A few apps (Aladdin Connect, for one) open their main screen in a new window that Android won't let another app
-resize. [Shizuku](https://github.com/RikkaApps/Shizuku) runs a small helper with adb-level access that can. Install
-it, start it, and allow MiniCarHome when Shizuku asks:
+resize, and apps locked to portrait need a freeform window. Only the shell user (what ADB runs as) can move
+other apps' windows, so [Box Tools](https://github.com/kynrek/BoxTools) 1.9 or later does it for MiniCarHome: it
+connects to the box's own ADB (always on at 127.0.0.1:5555 on this firmware, no Wi-Fi needed) and runs the
+commands there. Only apps signed with the same key as Box Tools can ask it to. Nothing else to install; the
+first connection makes Android ask to allow USB debugging (the MMB box answers that by itself). Optional:
 
 ```sh
-adb install shizuku.apk          # from github.com/RikkaApps/Shizuku/releases
-adb shell "$(adb shell pm path moe.shizuku.privileged.api | cut -d: -f2 | xargs dirname)/lib/arm64/libshizuku.so"
-adb shell pm grant moe.shizuku.privileged.api android.permission.WRITE_SECURE_SETTINGS   # lets it start on boot
 adb shell settings put global force_resizable_activities 1   # lets apps marked non-resizable (TeamViewer) use a window
 ```
 
-Shizuku stops when the box reboots. [Box Tools](https://github.com/kynrek/BoxTools) 1.7 or later starts it again
-after every boot, with or without Wi-Fi. Without Box Tools, start it from the Shizuku app (Start, via wireless
-debugging, which needs a Wi-Fi network), or pair it once and turn on its start-on-boot option, which also needs
-Wi-Fi at boot.
+Earlier versions used [Shizuku](https://github.com/RikkaApps/Shizuku) for this; it's no longer needed.
 
 Back to the stock home screen:
 `adb shell cmd package set-home-activity com.android.launcher3/.uioverrides.QuickstepLauncher`
@@ -206,12 +205,12 @@ which also turns Wireless debugging off. Tap **Wireless Debug** (Box Tools) to t
 **An app opens full screen instead of in the main window.** Android won't move a window that's already
 open. Swipe the app away in Recents once and it will open in the main window from then on. Some apps (Aladdin
 Connect, for one) open their main screen as a new task from a splash screen, which Android sizes to the whole
-screen. With [Shizuku](#optional-shizuku) running, MiniCarHome moves whatever window an app ends up in into the
+screen. With [window control](#window-control-box-tools), MiniCarHome moves whatever window an app ends up in into the
 main window, caption-free like any other app; without it those apps open full screen.
 
 **An app keeps a ▭ ✕ bar.** It's locked to portrait (Aladdin Connect, TeamViewer, US Mobile, APKPure and
 Netflix's sign-in screens are). Without the bar Android squeezes such apps into a narrow portrait column, so
-MiniCarHome checks for that (with Shizuku) and gives them a freeform window, which fills the main window but
+MiniCarHome checks for that (with Box Tools) and gives them a freeform window, which fills the main window but
 keeps the bar.
 
 ## Build
@@ -249,8 +248,7 @@ This writes `minicarhome/out/minicarhome.apk`, signed with `~/.android/debug.key
 
 ## License
 
-[MIT](LICENSE). Icons are from Google's Material icons (Apache 2.0). Includes the Shizuku API (MIT), see
-`minicarhome/libs/README.md`.
+[MIT](LICENSE). Icons are from Google's Material icons (Apache 2.0).
 
 ## Website
 

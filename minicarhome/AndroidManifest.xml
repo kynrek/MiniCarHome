@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.kynrek.minicarhome"
-    android:versionCode="6"
-    android:versionName="1.5">
+    android:versionCode="7"
+    android:versionName="1.6">
 
     <uses-sdk android:minSdkVersion="29" android:targetSdkVersion="34" />
 
@@ -10,7 +10,8 @@
          Granted over ADB: appops set com.kynrek.minicarhome SYSTEM_ALERT_WINDOW allow -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
-    <!-- Ask Box Tools' gesture service to tap the Maps window's close button when the panel resizes. -->
+    <!-- Box Tools: its gesture service taps the Maps window's close button when the panel resizes, and its
+         shell provider sees and arranges other apps' windows (as the shell user, through the box's own adbd). -->
     <uses-permission android:name="local.boxtools.permission.CONTROL" />
 
     <!-- Signal indicators. READ_PHONE_STATE (for LTE/5G) is granted over ADB:
@@ -32,10 +33,9 @@
          pm grant com.kynrek.minicarhome android.permission.RECORD_AUDIO -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
-    <!-- Shizuku (optional): resizes apps whose main screen opens in a new window so they fit the main pane. -->
-    <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
-
     <queries>
+        <!-- Box Tools: window control (its local.boxtools.shell provider) and closing windows. -->
+        <package android:name="local.boxtools" />
         <intent>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
@@ -46,14 +46,6 @@
     </queries>
 
     <application android:label="MiniCarHome" android:icon="@drawable/ic_launcher" android:allowBackup="false">
-        <meta-data android:name="moe.shizuku.client.V3_SUPPORT" android:value="true" />
-        <provider
-            android:name="rikka.shizuku.ShizukuProvider"
-            android:authorities="com.kynrek.minicarhome.shizuku"
-            android:multiprocess="false"
-            android:enabled="true"
-            android:exported="true"
-            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
 
         <activity android:name=".HomeActivity"
             android:label="MiniCarHome"
